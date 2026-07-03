@@ -211,10 +211,10 @@ module.exports = [
   },
   {
     id: 'C21',
-    desc: '순수 숫자.소수 코드(문자없음)가 공급면적 섹션에서 인식',
+    desc: '순수 숫자 코드(문자/점 없음, 예: 105타입)가 공급면적 섹션에서 인식',
     run: function (p) {
-      const area = p.parseAreaSection('공급면적 및 공급규모\n084.9750    84.9750    109.5432    120');
-      return area.length === 1 && area[0].code === '084.9750';
+      const area = p.parseAreaSection('공급면적 및 공급규모\n105    84.97    109.54    92');
+      return area.length === 1 && area[0].code === '105' && area[0].supply_units === 92;
     }
   },
   {

@@ -81,10 +81,11 @@
   function analyze(form) {
     var areaList = window.parseAreaSection(form.area);
     var codes = areaList.map(function (a) { return a.code; });
-    var priceResult = window.parsePriceSection(form.price, codes);
+    var meta = window.extractMeta([form.price, form.area, form.balcony, form.option].join('\n'));
+    // 공고일을 기준일로 넘겨 "계약 후 30일이내" 같은 상대일자 중도금 표기도 절대일자로 환산
+    var priceResult = window.parsePriceSection(form.price, codes, meta.open_date);
     var balconyMap = window.parseBalconySection(form.balcony, codes);
     var optionMap = window.parseOptionSection(form.option, codes);
-    var meta = window.extractMeta([form.price, form.area, form.balcony, form.option].join('\n'));
 
     var types = areaList.map(function (a) {
       var rows = priceResult.priceRows

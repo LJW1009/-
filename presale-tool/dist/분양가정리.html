@@ -162,11 +162,13 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
  * 분양가 정리 도구 - 파서 모듈 (Agent A)
  *
  * Contract:
- *   parseAreaSection(text)              -> [{code, exclusive_area, supply_area, supply_units}]
- *   parsePriceSection(text, codes)       -> {midDates, priceRows, unit_mult}
- *   parseBalconySection(text, codes)     -> {code: amount}
- *   parseOptionSection(text, codes)      -> {code: amount}
- *   extractMeta(text)                    -> {open_date, move_in_year, move_in_month}
+ *   parseAreaSection(text)                      -> [{code, exclusive_area, supply_area, supply_units}]
+ *   parsePriceSection(text, codes, baseDate?)    -> {midDates, priceRows, unit_mult}
+ *   parseBalconySection(text, codes)             -> {code: amount}
+ *   parseOptionSection(text, codes)              -> {code: amount}
+ *   extractMeta(text)                            -> {open_date, move_in_year, move_in_month}
+ *
+ * (baseDate는 하위호환 3번째 선택 인자: 상대일자 "30일이내" 등을 절대일자로 환산할 때 기준일로 사용)
  *
  * 원칙: 앵커(고정 위치) 기반 파싱 대신 헤더를 먼저 읽어 단위/오프셋을 결정한 뒤 데이터 행을 해석한다.
  */
@@ -181,14 +183,22 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     return String(text || '')
       .replace(/\r\n?/g, '\n')
       .split('\n')
-      .map(function (l) { return l.replace(/ /g, ' ').trim(); })
+      .map(function (l) { return l.trim(); })
       .filter(function (l) { return l.length > 0; });
   }
 
-  // 숫자 토큰(콤마/공백 포함) -> Number. 실패 시 NaN
+  // 표 헤더 키워드가 PDF 복사 과정에서 공백 없이 붙는 오염("잔금대지비") 교정
+  var KEYWORDS = ['계약금', '중도금', '잔금', '대지비', '건축비', '부가가치세', '부가세', '합계', '소계', '공급금액', '납부일정'];
+  var KEYWORD_ALT = KEYWORDS.join('|');
+  var GLUE_RE = new RegExp('(' + KEYWORD_ALT + ')(?=(' + KEYWORD_ALT + '))', 'g');
+  function despaceKeywords(text) {
+    return String(text || '').replace(GLUE_RE, '$1 ');
+  }
+
+  // 숫자 토큰(콤마/공백/단위기호 포함) -> Number. 실패 시 NaN
   function toNum(tok) {
     if (tok == null) return NaN;
-    var s = String(tok).replace(/[,\s원]/g, '');
+    var s = String(tok).replace(/[,\s원㎡]/g, '');
     if (s === '' || s === '-') return NaN;
     return Number(s);
   }
@@ -197,67 +207,154 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     return /^-?\d[\d,]*(\.\d+)?$/.test(String(tok).trim());
   }
 
-  // 주택형/관리번호 코드로 볼 수 있는 토큰인가
-  // 예: 084.9750A, 059.9700, 101A, T101A, 84A
-  function isCodeToken(tok) {
-    return /^[A-Za-z]?\d{2,3}(\.\d+)?[A-Za-z]{0,2}$/.test(tok) && /[A-Za-z]|\./.test(tok) === true || /^[A-Za-z]\d+[A-Za-z]?$/.test(tok);
-  }
-
-  function splitCols(line) {
-    return line.split(/\t+|\s{2,}|\s(?=\d)|(?<=\D)\s(?=[A-Za-z0-9])/)
-      .map(function (s) { return s.trim(); })
-      .filter(Boolean);
-  }
+  // 짧은형 코드: 84A, 54A1, 84OA, 200A, 84O 등 (점(.) 없는 숫자+영문 조합)
+  var SHORT_CODE_RE = /^\d{2,4}[A-Za-z]{1,2}\d{0,2}$/;
+  // 긴 소수형 코드: 059.9700A (문자 접미사 필수 - 없으면 순수 면적값과 구분 불가)
+  var LONG_CODE_RE = /^\d{2,3}\.\d{2,4}[A-Za-z]{1,2}$/;
 
   // 좀더 단순하고 견고한 토크나이저: 탭/2칸 이상 공백을 컬럼 구분자로, 그 외 단일 공백은 유지
   function tokenize(line) {
-    // 우선 탭 또는 2칸 이상 공백으로 분리 시도
     var byWide = line.split(/\t+|\s{2,}/).map(function (s) { return s.trim(); }).filter(Boolean);
     if (byWide.length > 1) return byWide;
-    // 단일 공백만 있는 경우 전체를 공백 단위로 분리
     return line.split(/\s+/).filter(Boolean);
+  }
+
+  // 알려진 codes 목록을 이용해 한 줄 안에서 코드(들)를 찾는다.
+  // 쉼표/공백/슬래시/가운뎃점으로 나뉜 조각을 개별 비교하고, 인접 조각을 합친 것도 비교한다.
+  // (예: "76, 84A, 84B" 묶음형, "84 A" 처럼 코드 내부에 공백이 낀 경우 모두 지원)
+  function findCodesInLine(line, codeSet) {
+    if (!codeSet || !codeSet.length) return { codes: [], consumed: [] };
+    var parts = line.split(/[,，·/\s]+/).map(function (s) { return s.trim(); }).filter(Boolean);
+    var found = [];
+    var consumed = [];
+    parts.forEach(function (p) {
+      if (codeSet.indexOf(p) !== -1 && found.indexOf(p) === -1) { found.push(p); consumed.push(p); }
+    });
+    for (var i = 0; i < parts.length - 1; i++) {
+      var merged = parts[i] + parts[i + 1];
+      if (codeSet.indexOf(merged) !== -1 && found.indexOf(merged) === -1) {
+        found.push(merged); consumed.push(parts[i]); consumed.push(parts[i + 1]);
+      }
+    }
+    return { codes: found, consumed: consumed };
+  }
+
+  // PDF 복사 시 표 전체가 개행 없이 한 줄로 직렬화되는 경우, 알려진 codes 위치를 앵커로 행을 분리
+  function expandMegaLines(ls, codeSet) {
+    if (!codeSet || !codeSet.length) return ls;
+    var out = [];
+    ls.forEach(function (line) {
+      var matches = [];
+      codeSet.forEach(function (c) {
+        var idx = -1;
+        while ((idx = line.indexOf(c, idx + 1)) !== -1) matches.push({ idx: idx, code: c });
+      });
+      if (matches.length <= 1) { out.push(line); return; }
+      matches.sort(function (a, b) { return a.idx - b.idx || b.code.length - a.code.length; });
+      var dedup = [];
+      matches.forEach(function (m) {
+        var last = dedup[dedup.length - 1];
+        if (last && m.idx < last.idx + last.code.length) return; // 겹치는 매치 제외
+        dedup.push(m);
+      });
+      for (var i = 0; i < dedup.length; i++) {
+        var start = dedup[i].idx;
+        var end = (i + 1 < dedup.length) ? dedup[i + 1].idx : line.length;
+        var seg = line.slice(start, end).trim();
+        if (seg) out.push(seg);
+      }
+    });
+    return out;
+  }
+
+  // 동/호 표기 추출: "101동 2호", "2·3호", "1호/4호", "101동 102동 1호, 4호" 등
+  function extractDong(line) {
+    var re = /[\d·,/]*\d\s*(?:동|호)/g;
+    var matches = [];
+    var m;
+    while ((m = re.exec(line))) matches.push({ idx: m.index, end: m.index + m[0].length });
+    if (!matches.length) return '';
+    var start = matches[0].idx;
+    var end = matches[matches.length - 1].end;
+    return line.slice(start, end).replace(/·/g, ', ').replace(/\s+/g, ' ').trim();
+  }
+
+  // ---------------------------------------------------------------------
+  // 날짜 (유연한 형식 + 상대일자)
+  // ---------------------------------------------------------------------
+
+  // 2~4자리 연도, 구분자 . - / 년, 말미 마침표 허용: 2026.10.06 / 24.09.25 / 2026-07-28 / 2026/10/06 / 2026.10.15.
+  function parseFlexDate(str) {
+    var m = String(str || '').match(/(\d{2,4})[.\-/년]\s*(\d{1,2})[.\-/월]\s*(\d{1,2})\s*\.?\s*일?/);
+    if (!m) return null;
+    var y = Number(m[1]);
+    if (y < 100) y += 2000;
+    var d = new Date(y, Number(m[2]) - 1, Number(m[3]));
+    if (isNaN(d.getTime())) return null;
+    return d;
+  }
+
+  // "계약 후 30일이내", "계약30일내", "30일이내", "30일 이내", "계약후30일", "1달이내"
+  function parseRelativeOffset(str) {
+    var s = String(str || '');
+    var m = s.match(/(\d+)\s*일\s*(?:이내|내)?/);
+    if (m) return { days: Number(m[1]) };
+    var m2 = s.match(/(\d+)\s*(?:달|개월)\s*(?:이내|내)?/);
+    if (m2) return { months: Number(m2[1]) };
+    return null;
+  }
+
+  function applyOffset(baseDate, off) {
+    if (!baseDate || !off) return null;
+    var d = new Date(baseDate.getTime());
+    if (off.days) d.setDate(d.getDate() + off.days);
+    if (off.months) d.setMonth(d.getMonth() + off.months);
+    return d;
   }
 
   // ---------------------------------------------------------------------
   // 헤더 분석 (단위 / 합계 오프셋)
   // ---------------------------------------------------------------------
 
-  function detectUnitMult(headerText) {
-    if (/천\s*원/.test(headerText)) return 1000;
+  function detectUnitMult(hdrText) {
+    if (/천\s*원/.test(hdrText)) return 1000;
     return 1;
   }
 
-  // 대지비 건축비 (부가세) 합계 오프셋: "합계"가 대지비/건축비/부가세 클러스터 뒤에 몇 칸 떨어져 있는지
-  function detectOffset(headerText) {
-    var hasVat = /부가가치세|부가세/.test(headerText);
+  // 대지비 건축비 (부가세) 합계 오프셋: 부가세 표기 유무만으로 결정.
+  // 합계열 라벨은 "합계"/"소계"/"계" 등으로 다양하게 표기되지만 오프셋 자체와는 무관하다.
+  function detectOffset(hdrText) {
+    var hasVat = /부가가치세|부가세/.test(hdrText);
     return hasVat ? 3 : 2;
   }
 
-  function parseTableHeader(sectionText) {
-    var ls = lines(sectionText);
+  function parseTableHeader(sectionText, baseDate) {
+    var text = despaceKeywords(sectionText);
+    var ls = lines(text);
     var headerLines = ls.slice(0, 4).join(' ');
-    var unit_mult = detectUnitMult(headerText(sectionText));
+    var unit_mult = detectUnitMult(headerText(text));
     var offset = detectOffset(headerLines);
-    var midDates = extractMidDates(sectionText);
+    var midDates = extractMidDates(text, baseDate);
     return { unit_mult: unit_mult, offset: offset, midDates: midDates };
   }
 
   function headerText(text) {
-    // 괄호 안 단위표기, 혹은 상단 3줄
-    var m = String(text).match(/\(\s*단위\s*[:：]?\s*[^\)]*\)/);
+    var m = String(text).match(/\(\s*단위\s*[:：]?\s*[^)]*\)/);
     if (m) return m[0];
     return lines(text).slice(0, 3).join(' ');
   }
 
-  function extractMidDates(text) {
-    // 중도금 1~6차 옆의 날짜 (YYYY.MM.DD / YYYY-MM-DD / YYYY년 MM월 DD일)
+  function extractMidDates(text, baseDate) {
     var dates = [];
-    var re = /중도금\s*(\d)\s*차[^0-9]{0,10}(\d{4})[.\-년]\s*(\d{1,2})[.\-월]\s*(\d{1,2})/g;
-    var m;
     var byIdx = {};
+    var re = /중도금\s*(\d)\s*차([^중]{0,40})/g;
+    var m;
     while ((m = re.exec(text))) {
       var idx = Number(m[1]);
-      byIdx[idx] = new Date(Number(m[2]), Number(m[3]) - 1, Number(m[4]));
+      var chunk = m[2];
+      var d = parseFlexDate(chunk);
+      if (!d && baseDate) d = applyOffset(baseDate, parseRelativeOffset(chunk));
+      if (d) byIdx[idx] = d;
     }
     for (var i = 1; i <= 6; i++) dates.push(byIdx[i] || null);
     return dates;
@@ -268,23 +365,17 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   // ---------------------------------------------------------------------
 
   function parseAreaSection(text) {
+    text = String(text || '').replace(/㎡/g, ' ');
     var out = [];
     var ls = lines(text);
     for (var i = 0; i < ls.length; i++) {
       var line = ls[i];
       if (/공급면적|공급규모|전용면적|관리번호|주택형|호형/.test(line) && !/\d\.\d/.test(line)) {
-        continue; // 헤더성 라인 스킵 (숫자 데이터가 없는 라벨 라인)
+        continue; // 헤더성 라인 스킵
       }
       var toks = tokenize(line);
       if (toks.length < 3) continue;
 
-      // 숫자 토큰들 수집 (콤마 포함 정수/소수)
-      var nums = [];
-      var numIdx = [];
-      for (var j = 0; j < toks.length; j++) {
-        if (isNum(toks[j])) { nums.push(toNum(toks[j])); numIdx.push(j); }
-      }
-      // 면적(소수) 두 개 + 세대수(정수) 한 개 이상 필요
       var floats = [];
       var ints = [];
       for (var k = 0; k < toks.length; k++) {
@@ -293,30 +384,44 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       }
       if (floats.length < 2) continue;
 
-      // 전용면적 < 공급면적 이라는 도메인 지식으로 정렬
-      floats.sort(function (a, b) { return a.v - b.v; });
-      var exclusive_area = floats[0].v;
-      var supply_area = floats[floats.length - 1].v;
-
-      // 세대수: 정수 토큰 중 마지막 것 (관리번호 등 코드성 정수는 이미 floats/ints 분류에서 실수와 섞이지 않음을 전제)
-      var supply_units = ints.length ? ints[ints.length - 1].v : NaN;
+      // 세대수: 1000 미만 정수 중 마지막 것 우선 (관리번호처럼 큰 정수는 제외)
+      var smallInts = ints.filter(function (x) { return x.v < 1000; });
+      var supply_units = smallInts.length ? smallInts[smallInts.length - 1].v
+        : (ints.length ? ints[ints.length - 1].v : NaN);
       if (!isFinite(supply_units)) continue;
 
-      // 코드: 숫자+영문 조합 토큰 중 첫 번째, 혹은 면적 소수값에서 유도 (059.9700A 등)
+      // 코드: 1) 짧은형(84A 등) 2) 긴 소수형(084.9750 등) 3) 면적값 바로 옆의 순수정수(76, 105 등, 마지막 수단)
+      // 순수정수 후보는 세대수 열과 혼동될 위험이 있어 첫 면적값 바로 앞/뒤 칸으로만 제한한다.
       var code = null;
       for (var t = 0; t < toks.length; t++) {
-        if (/^[A-Za-z]?\d{2,3}(\.\d+)?[A-Za-z]{0,2}$/.test(toks[t]) && /[A-Za-z]/.test(toks[t])) {
-          code = toks[t];
-          break;
+        if (SHORT_CODE_RE.test(toks[t])) { code = toks[t]; break; }
+      }
+      if (!code) {
+        for (var t2 = 0; t2 < toks.length; t2++) {
+          if (LONG_CODE_RE.test(toks[t2])) { code = toks[t2]; break; }
         }
       }
       if (!code) {
-        // 순수 숫자 코드도 허용 (예: 084.9750)
-        for (var t2 = 0; t2 < toks.length; t2++) {
-          if (/^\d{2,3}\.\d{2,4}$/.test(toks[t2])) { code = toks[t2]; break; }
+        var floatIdxs = floats.map(function (f) { return f.idx; });
+        var firstFloatIdx = Math.min.apply(null, floatIdxs);
+        var adj = [toks[firstFloatIdx - 1], toks[firstFloatIdx + 1]].filter(Boolean);
+        for (var ai = 0; ai < adj.length; ai++) {
+          if (/^\d{2,3}$/.test(adj[ai]) && Number(adj[ai]) < 1000) { code = adj[ai]; break; }
         }
       }
       if (!code) continue;
+
+      // 전용면적: 코드 숫자 접두부(예: "84A"->84)에 가장 가까운 면적값. 공급면적: 전용면적보다 큰 값 중 최솟값.
+      // (공급대상표에 공용/계약면적 등 부가 면적열이 더 있어도 전용/공급 쌍을 안정적으로 골라낸다.)
+      var codeNum = parseFloat((code.match(/\d+/) || [])[0]);
+      var byAsc = floats.slice().sort(function (a, b) { return a.v - b.v; });
+      var byCloseness = floats.slice().sort(function (a, b) { return Math.abs(a.v - codeNum) - Math.abs(b.v - codeNum); });
+      // codeNum이 실제 면적 접두부(예: "84A"->84, "84.976"에 가까움)일 때만 근접도 기준을 신뢰한다.
+      // "101A" 같은 호실번호형 코드처럼 면적과 무관한 숫자면 근접도가 무의미하므로 오름차순(최솟값) 기준으로 되돌아간다.
+      var closestDiffRatio = isFinite(codeNum) && codeNum > 0 ? Math.abs(byCloseness[0].v - codeNum) / codeNum : Infinity;
+      var exclusive_area = (isFinite(codeNum) && closestDiffRatio <= 0.5) ? byCloseness[0].v : byAsc[0].v;
+      var rest = floats.filter(function (f) { return f.v > exclusive_area; }).sort(function (a, b) { return a.v - b.v; });
+      var supply_area = rest.length ? rest[0].v : exclusive_area;
 
       out.push({
         code: code,
@@ -341,6 +446,9 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     s = s.replace(/층/g, '').trim();
 
     var m;
+    if (s === '전' || /^전체?$/.test(s)) {
+      return { raw: raw, kind: 'all', min: null, max: null, label: label };
+    }
     if ((m = s.match(/^(\d+)\s*이상$/))) {
       return { raw: raw, kind: 'above', min: Number(m[1]), max: Infinity, label: label };
     }
@@ -350,14 +458,28 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     if ((m = s.match(/^(\d+)\s*[~\-]\s*(\d+)$/))) {
       return { raw: raw, kind: 'range', min: Number(m[1]), max: Number(m[2]), label: label };
     }
-    if (/^\d+(\s*,\s*\d+)+$/.test(s)) {
-      var floors = s.split(',').map(function (x) { return Number(x.trim()); });
-      return { raw: raw, kind: 'list', floors: floors, min: Math.min.apply(null, floors), max: Math.max.apply(null, floors), label: label };
+    // 쉼표 나열 + 범위 혼합: "5,7,9" / "6,8~9" / "10,12~13"
+    if (/^\d+(~\d+)?(\s*,\s*\d+(~\d+)?)+$/.test(s)) {
+      var segs = s.split(',').map(function (x) { return x.trim(); });
+      var floors = [];
+      var isMixed = false;
+      segs.forEach(function (seg) {
+        var rm = seg.match(/^(\d+)~(\d+)$/);
+        if (rm) {
+          isMixed = true;
+          for (var x = Number(rm[1]); x <= Number(rm[2]); x++) floors.push(x);
+        } else {
+          floors.push(Number(seg));
+        }
+      });
+      return {
+        raw: raw, kind: isMixed ? 'mixed' : 'list', floors: floors,
+        min: Math.min.apply(null, floors), max: Math.max.apply(null, floors), label: label
+      };
     }
     if ((m = s.match(/^(\d+)$/))) {
       return { raw: raw, kind: 'exact', min: Number(m[1]), max: Number(m[1]), label: label };
     }
-    // 인식 불가 -> 전체(all)로 취급
     return { raw: raw, kind: 'all', min: null, max: null, label: label };
   }
 
@@ -365,51 +487,47 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   // ② 공급금액 및 납부일정
   // ---------------------------------------------------------------------
 
-  function parsePriceSection(text, codes) {
-    var hdr = parseTableHeader(text);
+  function parsePriceSection(text, codes, baseDate) {
+    text = despaceKeywords(String(text || ''));
+    var hdr = parseTableHeader(text, baseDate);
     var unit_mult = hdr.unit_mult;
-    var offset = hdr.offset;
     var midDates = hdr.midDates;
 
     var codeSet = codes && codes.length ? codes.slice() : null;
     var priceRows = [];
-    var ls = lines(text);
+    var ls = expandMegaLines(lines(text), codeSet);
 
     for (var i = 0; i < ls.length; i++) {
       var line = ls[i];
       if (/^\(?\s*단위/.test(line)) continue;
-      if (/구분|계약금|중도금|잔금|대지비|건축비|합계|공급금액|납부일정/.test(line) && !/\d/.test(line.replace(/[0-9]/g, ''))) {
-        // 라벨/숫자 혼재 판단이 애매하므로 아래 별도 검사로 대체
-      }
 
       var toks = tokenize(line);
       if (toks.length < 2) continue;
 
-      // 코드 탐색: codes가 주어지면 정확히 일치하는 토큰을 우선 사용 (임의의 코드 형식 지원)
       var code = null;
+      var consumed = [];
       if (codeSet) {
-        for (var tc = 0; tc < toks.length; tc++) {
-          if (codeSet.indexOf(toks[tc]) !== -1) { code = toks[tc]; break; }
-        }
+        var found = findCodesInLine(line, codeSet);
+        if (found.codes.length) { code = found.codes[0]; consumed = found.consumed; }
       }
       if (!code) {
         for (var t = 0; t < toks.length; t++) {
-          if (/^[A-Za-z]?\d{2,3}(\.\d+)?[A-Za-z]{0,2}$/.test(toks[t]) && /[A-Za-z]/.test(toks[t])) { code = toks[t]; break; }
+          if (SHORT_CODE_RE.test(toks[t])) { code = toks[t]; break; }
         }
         if (!code) {
           for (var t3 = 0; t3 < toks.length; t3++) {
-            if (/^\d{2,3}\.\d{2,4}$/.test(toks[t3])) { code = toks[t3]; break; }
+            if (LONG_CODE_RE.test(toks[t3])) { code = toks[t3]; break; }
           }
         }
       }
       if (!code) continue;
       if (codeSet && codeSet.indexOf(code) === -1) continue;
 
-      // 층구분 탐색: '층' 포함 토큰이거나 숫자/범위 패턴, 또는 이상/이하 포함, 콤마 리스트
+      // 층구분 탐색: '층' 포함 토큰이거나 숫자/범위/쉼표 패턴 (코드 조각으로 소비된 토큰은 제외)
       var floorTok = null;
       for (var f = 0; f < toks.length; f++) {
         var tk = toks[f];
-        if (tk === code) continue;
+        if (tk === code || consumed.indexOf(tk) !== -1) continue;
         if (/층|이상|이하/.test(tk) || /^\d+([~\-,]\d+)*$/.test(tk)) {
           floorTok = tk;
           break;
@@ -418,33 +536,26 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       floorTok = floorTok || '전체';
       var floor = parseFloorDesc(floorTok);
 
-      // 동/라인 탐색: "101동", "A라인" 등
-      var dong = '';
-      for (var d = 0; d < toks.length; d++) {
-        if (/^\d+동$/.test(toks[d]) || /라인$/.test(toks[d])) { dong = toks[d]; break; }
-      }
+      var dong = extractDong(line);
 
-      // 금액 계열 숫자 수집 (큰 정수형, 콤마 포함 가능)
       var moneyToks = toks.filter(function (tk) {
-        return /^\d[\d,]*$/.test(tk) && tk.length >= 4;
+        return /^\d[\d,]*$/.test(tk) && tk.replace(/,/g, '').length >= 4;
       }).map(toNum);
 
       if (!moneyToks.length) continue;
 
-      // 세대수: 가장 작은 숫자(2~4자리)로 간주되는 순수 정수, 금액과 겹치지 않도록 3자리 미만 우선
-      var unitsTok = toks.filter(function (tk) { return /^\d{1,3}$/.test(tk); });
-      var units = unitsTok.length ? Number(unitsTok[0]) : null;
-
-      // 합계 = 마지막에서 (offset-1)번째... 실무적으로 금액열의 "합계"는 보통 맨 뒤에서 두번째~세번째
-      // 단순화: 계약금+중도금(6)+잔금 이후 나오는 합계열을 오프셋으로 식별
-      // 데이터 부족 시 marker: 전체 금액 토큰 중 최댓값을 총액(price)으로 사용
       var price = Math.max.apply(null, moneyToks) * unit_mult;
 
-      // 계약금: 금액 토큰 중 가장 작은 값 (정액), 혹은 %) 패턴이면 비율
-      var downRatioMatch = line.match(/계약금[^%\d]{0,20}(\d{1,2}(?:\.\d+)?)\s*%/);
-      var down_is_ratio = !!downRatioMatch;
-      var down_ratio = downRatioMatch ? Number(downRatioMatch[1]) / 100 : null;
+      // 계약금: %) 비율(단일 또는 분납 합산, 예: "5%+5%" -> 10%) 우선, 없으면 최소 금액을 정액으로 간주
+      var ratioMatches = line.match(/\d{1,2}(?:\.\d+)?\s*%/g);
+      var down_is_ratio = !!(ratioMatches && ratioMatches.length);
+      var down_ratio = down_is_ratio
+        ? ratioMatches.reduce(function (sum, r) { return sum + parseFloat(r) / 100; }, 0)
+        : null;
       var down_payment = down_is_ratio ? null : (moneyToks.length ? Math.min.apply(null, moneyToks) * unit_mult : null);
+
+      var unitsTok = toks.filter(function (tk) { return tk !== code && consumed.indexOf(tk) === -1 && /^\d{1,3}$/.test(tk); });
+      var units = unitsTok.length ? Number(unitsTok[0]) : null;
 
       priceRows.push({
         code: code,
@@ -465,35 +576,64 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   // ③ 발코니 확장비 / ④ 옵션(에어컨)
   // ---------------------------------------------------------------------
 
+  // N안형/N대형/기본·전실형 모두 "여러 후보 중 최소 금액 채택"으로 귀결되므로,
+  // 코드별로 등장하는 모든 금액 후보를 모아 최솟값을 취한다. 코드가 없는 연속행(안내/대수 설명 등)은
+  // 직전 코드의 후보로 이어붙인다. 묶음형(코드 여러개 + 금액 하나)도 각 코드에 동일 후보로 반영된다.
+  var CONTINUATION_RE = /^(\d+\s*안|\d+\s*대|기본|전실|추가)/;
+
   function parseAmountByCodeSection(text, codes) {
+    text = despaceKeywords(String(text || ''));
     var unit_mult = detectUnitMult(headerText(text));
     var codeSet = codes && codes.length ? codes.slice() : null;
-    var result = {};
+    // 주의: 발코니/에어컨 섹션은 "묶음형"(여러 코드가 한 줄을 공유)이 흔하므로
+    // 가격 섹션과 달리 expandMegaLines(단일 코드 반복 기준 행분리)를 적용하지 않는다.
     var ls = lines(text);
+
+    var candidates = {};
+    var currentCodes = [];
+
     for (var i = 0; i < ls.length; i++) {
-      var toks = tokenize(ls[i]);
-      var code = null;
+      var line = ls[i];
+      var toks = tokenize(line);
+      var foundCodes = [];
+
       if (codeSet) {
-        for (var tc = 0; tc < toks.length; tc++) {
-          if (codeSet.indexOf(toks[tc]) !== -1) { code = toks[tc]; break; }
-        }
-      }
-      if (!code) {
+        foundCodes = findCodesInLine(line, codeSet).codes;
+      } else {
         for (var t = 0; t < toks.length; t++) {
-          if (/^[A-Za-z]?\d{2,3}(\.\d+)?[A-Za-z]{0,2}$/.test(toks[t]) && /[A-Za-z]/.test(toks[t])) { code = toks[t]; break; }
+          if (SHORT_CODE_RE.test(toks[t])) { foundCodes = [toks[t]]; break; }
         }
-        if (!code) {
+        if (!foundCodes.length) {
           for (var t3 = 0; t3 < toks.length; t3++) {
-            if (/^\d{2,3}\.\d{2,4}$/.test(toks[t3])) { code = toks[t3]; break; }
+            if (LONG_CODE_RE.test(toks[t3])) { foundCodes = [toks[t3]]; break; }
           }
         }
       }
-      if (!code) continue;
-      if (codeSet && codeSet.indexOf(code) === -1) continue;
-      var moneyToks = toks.filter(function (tk) { return /^\d[\d,]*$/.test(tk) && tk.length >= 4; }).map(toNum);
-      if (!moneyToks.length) { result[code] = 0; continue; }
-      result[code] = Math.max.apply(null, moneyToks) * unit_mult;
+
+      if (foundCodes.length) {
+        currentCodes = foundCodes;
+      } else if (currentCodes.length && (CONTINUATION_RE.test(line) || /^\d[\d,]*$/.test(toks[0] || ''))) {
+        // 코드 없이 이어지는 옵션 설명행(안/대수/기본/전실) -> 직전 코드 유지
+      } else {
+        currentCodes = [];
+      }
+
+      if (!currentCodes.length) continue;
+
+      var moneyToks = toks.filter(function (tk) {
+        return /^\d[\d,]*$/.test(tk) && tk.replace(/,/g, '').length >= 4;
+      }).map(toNum);
+      if (!moneyToks.length) continue;
+
+      currentCodes.forEach(function (c) {
+        candidates[c] = (candidates[c] || []).concat(moneyToks);
+      });
     }
+
+    var result = {};
+    Object.keys(candidates).forEach(function (c) {
+      result[c] = Math.min.apply(null, candidates[c]) * unit_mult;
+    });
     return result;
   }
 
@@ -509,19 +649,13 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   // ⑤ 메타 정보
   // ---------------------------------------------------------------------
 
-  function parseKDate(str) {
-    var m = str.match(/(\d{4})[.\-년]\s*(\d{1,2})[.\-월]\s*(\d{1,2})?/);
-    if (!m) return null;
-    return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3] || 1));
-  }
-
   function extractMeta(text) {
     var open_date = null;
     var move_in_year = null;
     var move_in_month = null;
 
-    var openM = text.match(/(?:입주자\s*모집\s*)?공고일\s*[:：]?\s*(\d{4}[.\-년]\s*\d{1,2}[.\-월]\s*\d{1,2}[일]?)/);
-    if (openM) open_date = parseKDate(openM[1]);
+    var openM = text.match(/(?:입주자\s*모집\s*)?공고일\s*[:：]?\s*([0-9.\-/년월일\s]{6,20})/);
+    if (openM) open_date = parseFlexDate(openM[1]);
 
     var moveM = text.match(/입주\s*예정\s*(?:월|일|시기)?\s*[:：]?\s*(\d{4})\s*[년.\-]\s*(\d{1,2})\s*월?/);
     if (moveM) {
@@ -547,7 +681,11 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     parseFloorDesc: parseFloorDesc,
     detectUnitMult: detectUnitMult,
     detectOffset: detectOffset,
-    extractMidDates: extractMidDates
+    extractMidDates: extractMidDates,
+    parseFlexDate: parseFlexDate,
+    parseRelativeOffset: parseRelativeOffset,
+    despaceKeywords: despaceKeywords,
+    extractDong: extractDong
   };
 
   if (typeof module !== 'undefined' && module.exports) {
@@ -889,10 +1027,11 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   function analyze(form) {
     var areaList = window.parseAreaSection(form.area);
     var codes = areaList.map(function (a) { return a.code; });
-    var priceResult = window.parsePriceSection(form.price, codes);
+    var meta = window.extractMeta([form.price, form.area, form.balcony, form.option].join('\n'));
+    // 공고일을 기준일로 넘겨 "계약 후 30일이내" 같은 상대일자 중도금 표기도 절대일자로 환산
+    var priceResult = window.parsePriceSection(form.price, codes, meta.open_date);
     var balconyMap = window.parseBalconySection(form.balcony, codes);
     var optionMap = window.parseOptionSection(form.option, codes);
-    var meta = window.extractMeta([form.price, form.area, form.balcony, form.option].join('\n'));
 
     var types = areaList.map(function (a) {
       var rows = priceResult.priceRows
