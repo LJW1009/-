@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<title>분양가 정리 도구</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --border: #e2e5ea; --text: #1c1f26;
+    --sub: #6b7280; --accent: #2563eb; --accent-fg: #ffffff;
+    --danger: #dc2626; --ok: #16a34a;
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: -apple-system, "Malgun Gothic", "Apple SD Gothic Neo", sans-serif; background:var(--bg); color:var(--text); }
+  header.app-nav { display:flex; align-items:center; gap:8px; padding:10px 16px; background:var(--panel); border-bottom:1px solid var(--border); }
+  header.app-nav .brand { font-weight:700; margin-right:16px; }
+  header.app-nav button.nav-btn { border:none; background:transparent; padding:8px 14px; border-radius:8px; cursor:pointer; font-size:14px; color:var(--sub); }
+  header.app-nav button.nav-btn.active { background:var(--accent); color:var(--accent-fg); }
+
+  .view { display:none; }
+  .view.active { display:block; }
+
+  /* ---------- 입력 탭 ---------- */
+  #view-input .topbar { display:flex; flex-wrap:wrap; gap:10px; padding:14px 16px; background:var(--panel); border-bottom:1px solid var(--border); }
+  #view-input .topbar label { display:flex; flex-direction:column; font-size:12px; color:var(--sub); gap:4px; }
+  #view-input .topbar input, #view-input .topbar select { padding:6px 8px; border:1px solid var(--border); border-radius:6px; font-size:13px; min-width:110px; }
+
+  .quad { display:grid; grid-template-columns:1fr 1fr; grid-template-rows:1fr 1fr; gap:10px; padding:14px 16px; height:calc(100vh - 230px); min-height:320px; }
+  .quad .cell { display:flex; flex-direction:column; background:var(--panel); border:1px solid var(--border); border-radius:8px; overflow:hidden; }
+  .quad .cell .cell-title { padding:8px 10px; font-size:12px; font-weight:600; color:var(--sub); border-bottom:1px solid var(--border); }
+  .quad .cell textarea { flex:1; border:none; padding:10px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12px; resize:none; outline:none; }
+
+  .actions { display:flex; gap:8px; padding:10px 16px 18px; }
+  button.primary { background:var(--accent); color:#fff; border:none; padding:9px 16px; border-radius:8px; font-size:14px; cursor:pointer; }
+  button.secondary { background:#fff; color:var(--text); border:1px solid var(--border); padding:9px 16px; border-radius:8px; font-size:14px; cursor:pointer; }
+  button.small { padding:5px 10px; font-size:12px; border-radius:6px; }
+  #analyze-status { align-self:center; font-size:13px; color:var(--sub); }
+
+  /* ---------- 결과 탭 ---------- */
+  #view-result { display:none; grid-template-columns:260px 1fr; height:calc(100vh - 49px); }
+  #view-result.active { display:grid; }
+  .sidebar { background:var(--panel); border-right:1px solid var(--border); display:flex; flex-direction:column; }
+  .sidebar .tree { flex:1; overflow:auto; padding:8px; }
+  .sidebar .region { font-weight:700; font-size:13px; margin:8px 4px 2px; color:var(--sub); }
+  .sidebar .sigungu { font-size:12px; margin:2px 0 2px 8px; color:var(--sub); }
+  .sidebar .unit-item { padding:6px 10px; margin:2px 0 2px 16px; border-radius:6px; cursor:pointer; font-size:13px; }
+  .sidebar .unit-item:hover { background:var(--bg); }
+  .sidebar .unit-item.selected { background:var(--accent); color:#fff; }
+  .sidebar .sidebar-actions { padding:10px; border-top:1px solid var(--border); display:flex; flex-direction:column; gap:6px; }
+
+  .main { padding:16px; overflow:auto; }
+  .subtabs { display:flex; gap:4px; margin-bottom:12px; border-bottom:1px solid var(--border); }
+  .subtabs button { border:none; background:transparent; padding:8px 14px; cursor:pointer; font-size:13px; color:var(--sub); border-bottom:2px solid transparent; }
+  .subtabs button.active { color:var(--accent); border-color:var(--accent); font-weight:600; }
+  .subview { display:none; }
+  .subview.active { display:block; }
+
+  table.result-table { width:100%; border-collapse:collapse; font-size:12.5px; background:var(--panel); }
+  table.result-table th, table.result-table td { border:1px solid var(--border); padding:6px 8px; text-align:right; white-space:nowrap; }
+  table.result-table th { background:#eef1f5; text-align:center; }
+  table.result-table td.left { text-align:left; }
+  table.result-table tr.subtotal { background:#f0f5ff; font-weight:600; }
+  table.result-table tr.total { background:#fff4e5; font-weight:700; }
+
+  td.editable input { width:100%; border:1px solid var(--accent); border-radius:4px; padding:2px 4px; font-size:12.5px; text-align:right; }
+  .edit-row-actions button { margin-right:4px; }
+
+  #raw-view textarea { width:100%; height:70vh; font-family: ui-monospace, monospace; font-size:12px; padding:10px; border:1px solid var(--border); border-radius:8px; }
+  .empty-hint { color:var(--sub); padding:40px; text-align:center; }
+</style>
+</head>
+<body>
+
+<header class="app-nav">
+  <span class="brand">🏠 분양가 정리 도구</span>
+  <button class="nav-btn active" data-view="input">입력</button>
+  <button class="nav-btn" data-view="result">결과·수정</button>
+</header>
+
+<section id="view-input" class="view active">
+  <div class="topbar">
+    <label>단지명 <input id="f-name" type="text" placeholder="예: OO자이" /></label>
+    <label>광역 <select id="f-r1">
+      <option>서울</option><option>경기</option><option>인천</option><option>부산</option>
+      <option>대구</option><option>광주</option><option>대전</option><option>울산</option>
+      <option>세종</option><option>강원</option><option>충북</option><option>충남</option>
+      <option>전북</option><option>전남</option><option>경북</option><option>경남</option><option>제주</option>
+    </select></label>
+    <label>시군구 <input id="f-r2" type="text" placeholder="예: 수원시" /></label>
+    <label>구분 <select id="f-kind"><option>아파트</option><option>오피스텔</option></select></label>
+    <label>중도금조건 <select id="f-interest"><option>유이자</option><option>무이자</option><option>부분무이자</option></select></label>
+    <label>금리(%) <input id="f-rate" type="number" step="0.1" value="4.8" /></label>
+  </div>
+
+  <div class="quad">
+    <div class="cell">
+      <div class="cell-title">① 공급금액 및 납부일정</div>
+      <textarea id="in-price" placeholder="공급금액 및 납부일정 표를 붙여넣으세요"></textarea>
+    </div>
+    <div class="cell">
+      <div class="cell-title">② 공급면적 및 공급규모</div>
+      <textarea id="in-area" placeholder="공급면적 및 공급규모 표를 붙여넣으세요"></textarea>
+    </div>
+    <div class="cell">
+      <div class="cell-title">③ 발코니 확장비</div>
+      <textarea id="in-balcony" placeholder="발코니 확장비 표를 붙여넣으세요"></textarea>
+    </div>
+    <div class="cell">
+      <div class="cell-title">④ 에어컨 옵션가</div>
+      <textarea id="in-option" placeholder="에어컨 옵션가 표를 붙여넣으세요"></textarea>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button class="primary" id="btn-analyze">🔍 분석</button>
+    <button class="secondary" id="btn-add">➕ 추가</button>
+    <span id="analyze-status"></span>
+  </div>
+</section>
+
+<section id="view-result" class="view">
+  <aside class="sidebar">
+    <div class="tree" id="unit-tree"></div>
+    <div class="sidebar-actions">
+      <button class="secondary small" id="btn-export-excel">⬇️ 엑셀 다운로드</button>
+      <button class="secondary small" id="btn-save-json">💾 저장 (JSON)</button>
+      <label class="secondary small" style="text-align:center; cursor:pointer;">📂 불러오기
+        <input id="file-import" type="file" accept="application/json" style="display:none;" />
+      </label>
+    </div>
+  </aside>
+  <main class="main" id="result-main">
+    <div class="empty-hint">왼쪽 목록에서 단지를 선택하세요. 입력 탭에서 [➕ 추가]로 단지를 등록할 수 있습니다.</div>
+  </main>
+</section>
+
+
+<script src="vendor/xlsx.full.min.js"></script>
+<script src="parser.js"></script>
+<script src="excel.js"></script>
+<script src="logic.js"></script>
+</body>
+</html>

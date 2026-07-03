@@ -1,0 +1,20 @@
+{
+  "name": "presale-tool",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "node run_tests.js && node run_tests_c.js && node test_excel.js",
+    "test:e2e": "node e2e_test.js",
+    "build": "node build.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "playwright": "^1.61.1"
+  }
+}
