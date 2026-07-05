@@ -204,71 +204,104 @@
   // ① 공급면적 및 공급규모
   // ---------------------------------------------------------------------
 
+  // 한 주택형 분량의 토큰 조각에서 {code, exclusive_area, supply_area, supply_units}를 추출.
+  // 세그먼트 경계가 느슨해 앞/뒤 다른 주택형의 꼬리 토큰이 약간 섞여 들어와도,
+  // "면적값 이후 첫 정수 우선, 없으면 면적값 이전 마지막 정수"와 "코드 숫자 접두부에 가장
+  // 가까운 면적값" 규칙 덕분에 실제 값이 안정적으로 골라진다.
+  function extractAreaFromTokens(toks) {
+    var floats = [];
+    var ints = [];
+    for (var k = 0; k < toks.length; k++) {
+      if (/^\d+\.\d+$/.test(toks[k])) floats.push({ v: Number(toks[k]), idx: k });
+      else if (/^\d+$/.test(toks[k])) ints.push({ v: Number(toks[k]), idx: k });
+    }
+    if (floats.length < 2) return null;
+
+    // 코드: 1) 짧은형(84A 등) 2) 긴 소수형(084.9750A 등) 3) 면적값 바로 옆 순수정수(마지막 수단)
+    var code = null;
+    for (var t = 0; t < toks.length; t++) {
+      if (SHORT_CODE_RE.test(toks[t])) { code = toks[t]; break; }
+    }
+    if (!code) {
+      for (var t2 = 0; t2 < toks.length; t2++) {
+        if (LONG_CODE_RE.test(toks[t2])) { code = toks[t2]; break; }
+      }
+    }
+    var floatIdxs = floats.map(function (f) { return f.idx; });
+    var firstFloatIdx = Math.min.apply(null, floatIdxs);
+    var maxFloatIdx = Math.max.apply(null, floatIdxs);
+    if (!code) {
+      var adj = [toks[firstFloatIdx - 1], toks[firstFloatIdx + 1]].filter(Boolean);
+      for (var ai = 0; ai < adj.length; ai++) {
+        if (/^\d{2,3}$/.test(adj[ai]) && Number(adj[ai]) < 1000) { code = adj[ai]; break; }
+      }
+    }
+    if (!code) return null;
+
+    // 세대수: 면적값 뒤에 오는 정수 중 첫 번째(총공급세대수, 그 뒤로 특별공급 등 세부내역이 이어짐).
+    // 면적값 뒤에 정수가 전혀 없으면(세대수가 코드 바로 앞에 오는 오피스텔 "코드+세대수 먼저"형)
+    // 면적값 앞의 마지막 정수를 사용한다.
+    var intsAfter = ints.filter(function (x) { return x.idx > maxFloatIdx && x.v < 1000; });
+    var intsBefore = ints.filter(function (x) { return x.idx < firstFloatIdx && x.v < 1000; });
+    var supply_units = intsAfter.length ? intsAfter[0].v : (intsBefore.length ? intsBefore[intsBefore.length - 1].v : NaN);
+    if (!isFinite(supply_units)) return null;
+
+    // 전용면적: 코드 숫자 접두부(예: "84A"->84)에 가장 가까운 면적값. 공급면적: 전용면적보다 큰 값 중 최솟값.
+    // (공급대상표에 공용/계약면적 등 부가 면적열이 더 있어도 전용/공급 쌍을 안정적으로 골라낸다.)
+    var codeNum = parseFloat((code.match(/\d+/) || [])[0]);
+    var byAsc = floats.slice().sort(function (a, b) { return a.v - b.v; });
+    var byCloseness = floats.slice().sort(function (a, b) { return Math.abs(a.v - codeNum) - Math.abs(b.v - codeNum); });
+    // codeNum이 실제 면적 접두부일 때만 근접도 기준을 신뢰한다. "101A" 같은 호실번호형 코드처럼
+    // 면적과 무관한 숫자면 근접도가 무의미하므로 오름차순(최솟값) 기준으로 되돌아간다.
+    var closestDiffRatio = isFinite(codeNum) && codeNum > 0 ? Math.abs(byCloseness[0].v - codeNum) / codeNum : Infinity;
+    var exclusive_area = (isFinite(codeNum) && closestDiffRatio <= 0.5) ? byCloseness[0].v : byAsc[0].v;
+    var rest = floats.filter(function (f) { return f.v > exclusive_area; }).sort(function (a, b) { return a.v - b.v; });
+    var supply_area = rest.length ? rest[0].v : exclusive_area;
+
+    return { code: code, exclusive_area: exclusive_area, supply_area: supply_area, supply_units: supply_units };
+  }
+
   function parseAreaSection(text) {
     text = String(text || '').replace(/㎡/g, ' ');
-    var out = [];
-    var ls = lines(text);
-    for (var i = 0; i < ls.length; i++) {
-      var line = ls[i];
-      if (/공급면적|공급규모|전용면적|관리번호|주택형|호형/.test(line) && !/\d\.\d/.test(line)) {
-        continue; // 헤더성 라인 스킵
-      }
-      var toks = tokenize(line);
-      if (toks.length < 3) continue;
+    var tokens = text.split(/\s+/).filter(Boolean);
 
-      var floats = [];
-      var ints = [];
-      for (var k = 0; k < toks.length; k++) {
-        if (/^\d+\.\d+$/.test(toks[k])) floats.push({ v: Number(toks[k]), idx: k });
-        else if (/^\d+$/.test(toks[k])) ints.push({ v: Number(toks[k]), idx: k });
-      }
-      if (floats.length < 2) continue;
-
-      // 세대수: 1000 미만 정수 중 마지막 것 우선 (관리번호처럼 큰 정수는 제외)
-      var smallInts = ints.filter(function (x) { return x.v < 1000; });
-      var supply_units = smallInts.length ? smallInts[smallInts.length - 1].v
-        : (ints.length ? ints[ints.length - 1].v : NaN);
-      if (!isFinite(supply_units)) continue;
-
-      // 코드: 1) 짧은형(84A 등) 2) 긴 소수형(084.9750 등) 3) 면적값 바로 옆의 순수정수(76, 105 등, 마지막 수단)
-      // 순수정수 후보는 세대수 열과 혼동될 위험이 있어 첫 면적값 바로 앞/뒤 칸으로만 제한한다.
-      var code = null;
-      for (var t = 0; t < toks.length; t++) {
-        if (SHORT_CODE_RE.test(toks[t])) { code = toks[t]; break; }
-      }
-      if (!code) {
-        for (var t2 = 0; t2 < toks.length; t2++) {
-          if (LONG_CODE_RE.test(toks[t2])) { code = toks[t2]; break; }
-        }
-      }
-      if (!code) {
-        var floatIdxs = floats.map(function (f) { return f.idx; });
-        var firstFloatIdx = Math.min.apply(null, floatIdxs);
-        var adj = [toks[firstFloatIdx - 1], toks[firstFloatIdx + 1]].filter(Boolean);
-        for (var ai = 0; ai < adj.length; ai++) {
-          if (/^\d{2,3}$/.test(adj[ai]) && Number(adj[ai]) < 1000) { code = adj[ai]; break; }
-        }
-      }
-      if (!code) continue;
-
-      // 전용면적: 코드 숫자 접두부(예: "84A"->84)에 가장 가까운 면적값. 공급면적: 전용면적보다 큰 값 중 최솟값.
-      // (공급대상표에 공용/계약면적 등 부가 면적열이 더 있어도 전용/공급 쌍을 안정적으로 골라낸다.)
-      var codeNum = parseFloat((code.match(/\d+/) || [])[0]);
-      var byAsc = floats.slice().sort(function (a, b) { return a.v - b.v; });
-      var byCloseness = floats.slice().sort(function (a, b) { return Math.abs(a.v - codeNum) - Math.abs(b.v - codeNum); });
-      // codeNum이 실제 면적 접두부(예: "84A"->84, "84.976"에 가까움)일 때만 근접도 기준을 신뢰한다.
-      // "101A" 같은 호실번호형 코드처럼 면적과 무관한 숫자면 근접도가 무의미하므로 오름차순(최솟값) 기준으로 되돌아간다.
-      var closestDiffRatio = isFinite(codeNum) && codeNum > 0 ? Math.abs(byCloseness[0].v - codeNum) / codeNum : Infinity;
-      var exclusive_area = (isFinite(codeNum) && closestDiffRatio <= 0.5) ? byCloseness[0].v : byAsc[0].v;
-      var rest = floats.filter(function (f) { return f.v > exclusive_area; }).sort(function (a, b) { return a.v - b.v; });
-      var supply_area = rest.length ? rest[0].v : exclusive_area;
-
-      out.push({
-        code: code,
-        exclusive_area: exclusive_area,
-        supply_area: supply_area,
-        supply_units: supply_units
+    // 주택형 경계: 긴 소수형 코드(084.9750A 등)가 하나라도 있으면 그것을 우선 경계로 삼는다
+    // (관리번호형 표는 순번+긴코드+짧은코드 순으로 나오므로 긴코드가 가장 안정적인 기준점).
+    // 없으면 짧은형 코드(84A 등)를 경계로 사용한다.
+    var boundaries = [];
+    for (var i = 0; i < tokens.length; i++) if (LONG_CODE_RE.test(tokens[i])) boundaries.push(i);
+    if (!boundaries.length) {
+      for (var i2 = 0; i2 < tokens.length; i2++) if (SHORT_CODE_RE.test(tokens[i2])) boundaries.push(i2);
+    }
+    if (!boundaries.length) {
+      // 짧은형/긴형 코드가 전혀 없는 경우(순수 숫자 코드형): 줄 단위로 폴백해
+      // extractAreaFromTokens의 "면적값 인접 순수정수" 최후수단 규칙에 맡긴다.
+      var out2 = [];
+      lines(text).forEach(function (line) {
+        if (/공급면적|공급규모|전용면적|관리번호|주택형|호형/.test(line) && !/\d\.\d/.test(line)) return;
+        var lineToks = tokenize(line);
+        if (lineToks.length < 3) return;
+        var parsed2 = extractAreaFromTokens(lineToks);
+        if (parsed2) out2.push(parsed2);
       });
+      return out2;
+    }
+
+    // "합계/합 계" 총계행이 나오면 그 이전까지만 데이터로 취급 (마지막 주택형의 꼬리 오염 방지)
+    var totalIdx = tokens.length;
+    for (var ti = 0; ti < tokens.length; ti++) {
+      if (/^합계$/.test(tokens[ti]) || (/^합$/.test(tokens[ti]) && tokens[ti + 1] && /^계$/.test(tokens[ti + 1]))) {
+        totalIdx = ti; break;
+      }
+    }
+
+    var out = [];
+    for (var b = 0; b < boundaries.length; b++) {
+      var segStart = Math.max(0, boundaries[b] - 2);
+      var segEnd = (b + 1 < boundaries.length) ? boundaries[b + 1] : totalIdx;
+      if (segEnd <= segStart) continue;
+      var parsed = extractAreaFromTokens(tokens.slice(segStart, segEnd));
+      if (parsed) out.push(parsed);
     }
     return out;
   }
@@ -327,13 +360,129 @@
   // ② 공급금액 및 납부일정
   // ---------------------------------------------------------------------
 
+  // 헤더가 "대지비 건축비 (부가세) 합계/소계/계 계약시 <날짜×6> 입주시" 형태로 각 컬럼의
+  // 의미를 명시하는 실제 공고문 형식을 위한 컬럼맵 빌더. 표 전체가 개행 없이 헤더+데이터가
+  // 하나로 이어진 경우에도, "대지비"부터 시작해 인식 가능한 라벨/날짜가 이어지는 동안만
+  // 컬럼으로 채택하고 첫 미인식 토큰에서 멈춰 그 지점을 데이터 시작점으로 삼는다.
+  function buildPriceColumnMap(tokens, baseDate) {
+    var startIdx = -1;
+    for (var i = 0; i < tokens.length; i++) {
+      if (/대지비/.test(tokens[i])) { startIdx = i; break; }
+    }
+    if (startIdx === -1) return null;
+
+    var map = [];
+    var midDates = [];
+    var j = startIdx;
+    for (; j < tokens.length; j++) {
+      var tok = tokens[j];
+      if (/대지비/.test(tok)) { map.push('land'); continue; }
+      if (/건축비/.test(tok)) { map.push('build'); continue; }
+      if (/부가가치세|부가세/.test(tok)) { map.push('vat'); continue; }
+      if (/^(합계|소계|계)$/.test(tok)) { map.push('total'); continue; }
+      if (/계약시/.test(tok)) { map.push('down'); continue; }
+      if (/^입주시$|^입주지정일$/.test(tok)) { map.push('balance'); j++; break; }
+      var d = parseFlexDate(tok);
+      if (d) { map.push('mid'); midDates.push(d); continue; }
+      var off = baseDate ? parseRelativeOffset(tok) : null;
+      if (off) { map.push('mid'); midDates.push(applyOffset(baseDate, off)); continue; }
+      break; // 인식 불가 토큰 -> 헤더 종료, 이 지점부터 데이터
+    }
+
+    if (map.indexOf('land') === -1 || map.indexOf('build') === -1 || map.indexOf('total') === -1) return null;
+    if (map.filter(function (k) { return k === 'mid'; }).length < 1) return null;
+
+    while (midDates.length < 6) midDates.push(null);
+    return { map: map, dataStart: j, midDates: midDates.slice(0, 6) };
+  }
+
+  function isDongToken(tok) {
+    return /^\d/.test(tok) && /(동|호)/.test(tok) && !/층/.test(tok);
+  }
+  function isFloorToken(tok) {
+    return /층/.test(tok) || /^\d+([~\-,]\d+)*$/.test(tok);
+  }
+  function isMoneyToken(tok) {
+    return /^\d[\d,]*$/.test(tok) && tok.replace(/,/g, '').length >= 4;
+  }
+
+  // 헤더 컬럼맵을 이용해 코드/동호수가 매 행마다 반복되지 않고 이어지는(carry-forward)
+  // 실제 공고문 표를 파싱한다. 코드가 나오면 새 주택형으로, 동호수가 나오면 그 동호수로
+  // 갱신하고, "층구분 + 세대수 + (컬럼맵 길이)개의 금액" 패턴을 만나면 한 행으로 확정한다.
+  function scanPriceRowsWithMap(tokens, dataStart, colMap, codeSet, unit_mult) {
+    var rows = [];
+    var currentCode = null;
+    var currentDong = '';
+    var lastDongIdx = -1; // 직전 토큰이 동/호 토큰이었는지 (예: "101동" "2·3호" 두 토큰을 이어붙이기 위함)
+    var i = dataStart;
+    var n = tokens.length;
+
+    while (i < n) {
+      var tok = tokens[i];
+
+      var isCode = codeSet ? (codeSet.indexOf(tok) !== -1) : (SHORT_CODE_RE.test(tok) || LONG_CODE_RE.test(tok));
+      if (isCode) { currentCode = tok; currentDong = ''; lastDongIdx = -1; i++; continue; }
+
+      if (isDongToken(tok)) {
+        currentDong = (lastDongIdx === i - 1) ? (currentDong + ' ' + tok) : tok;
+        lastDongIdx = i;
+        i++; continue;
+      }
+
+      if (isFloorToken(tok) && currentCode) {
+        var unitsTok = tokens[i + 1];
+        if (unitsTok && /^\d{1,3}$/.test(unitsTok)) {
+          var slice = tokens.slice(i + 2, i + 2 + colMap.length);
+          if (slice.length === colMap.length && slice.every(isMoneyToken)) {
+            var values = { mid: [] };
+            colMap.forEach(function (kind, ci) {
+              var v = toNum(slice[ci]) * unit_mult;
+              if (kind === 'mid') values.mid.push(v); else values[kind] = v;
+            });
+            rows.push({
+              code: currentCode,
+              floor: parseFloorDesc(tok),
+              dong: currentDong,
+              units: Number(unitsTok),
+              price: values.total,
+              down_payment: values.down != null ? values.down : null,
+              down_is_ratio: false,
+              down_ratio: null,
+              land: values.land,
+              build: values.build,
+              vat: values.vat,
+              balance: values.balance,
+              mid_amounts: values.mid
+            });
+            i = i + 2 + colMap.length;
+            continue;
+          }
+        }
+      }
+      i++;
+    }
+    return rows;
+  }
+
   function parsePriceSection(text, codes, baseDate) {
     text = despaceKeywords(String(text || ''));
     var hdr = parseTableHeader(text, baseDate);
     var unit_mult = hdr.unit_mult;
-    var midDates = hdr.midDates;
-
     var codeSet = codes && codes.length ? codes.slice() : null;
+
+    // 1) 헤더 컬럼맵 우선 시도: 실제 공고문처럼 "대지비 건축비 합계 계약시 <날짜×6> 입주시"가
+    //    명시된 경우, 표가 통째로 한 줄이거나 코드/동호수가 행마다 반복되지 않아도 정확히 파싱된다.
+    var allTokens = text.split(/\s+/).filter(Boolean);
+    var colInfo = buildPriceColumnMap(allTokens, baseDate);
+    if (colInfo) {
+      var rows = scanPriceRowsWithMap(allTokens, colInfo.dataStart, colInfo.map, codeSet, unit_mult);
+      if (rows.length) {
+        return { midDates: colInfo.midDates, priceRows: rows, unit_mult: unit_mult };
+      }
+    }
+
+    // 2) 폴백: 헤더에 명시적 컬럼 구조가 없는 단순 표 형식 (기존 라인 단위 휴리스틱)
+    var midDates = hdr.midDates;
     var priceRows = [];
     var ls = expandMegaLines(lines(text), codeSet);
 
@@ -416,59 +565,64 @@
   // ③ 발코니 확장비 / ④ 옵션(에어컨)
   // ---------------------------------------------------------------------
 
-  // N안형/N대형/기본·전실형 모두 "여러 후보 중 최소 금액 채택"으로 귀결되므로,
-  // 코드별로 등장하는 모든 금액 후보를 모아 최솟값을 취한다. 코드가 없는 연속행(안내/대수 설명 등)은
-  // 직전 코드의 후보로 이어붙인다. 묶음형(코드 여러개 + 금액 하나)도 각 코드에 동일 후보로 반영된다.
-  var CONTINUATION_RE = /^(\d+\s*안|\d+\s*대|기본|전실|추가)/;
+  // N안형/N대형/기본·전실형 모두 "여러 후보(그룹) 중 최소 금액 채택"으로 귀결된다.
+  // 각 코드(또는 묶음형처럼 여러 코드가 한 그룹을 공유)마다 "그 그룹에서 처음 나오는 금액"만
+  // 후보로 취하고(총액/공급금액이 통상 가장 먼저 오고, 계약금·잔금 등 분할내역이 뒤따르므로),
+  // 코드가 반복 등장하며 그룹이 바뀔 때마다 새 후보를 추가해 그 중 최솟값을 취한다.
+  // 코드 없이 이어지는 설명행(안/대수/기본/전실/전체 등)은 직전 그룹의 코드를 이어받아 새 그룹을 연다.
+  var CONTINUATION_RE = /^(\d+\s*안|\d+\s*대|기본|전실|전체|추가)/;
+
+  function scanAmountGroups(tokens, codeSet) {
+    var groups = [];
+    var current = null;
+    for (var i = 0; i < tokens.length; i++) {
+      var tok = tokens[i];
+      var codesHere = [];
+      if (codeSet) {
+        tok.split(/[,，·/]/).filter(Boolean).forEach(function (p) {
+          if (codeSet.indexOf(p) !== -1) codesHere.push(p);
+        });
+      } else if (SHORT_CODE_RE.test(tok) || LONG_CODE_RE.test(tok)) {
+        codesHere = [tok];
+      }
+
+      if (codesHere.length) {
+        if (current && current.startedByCode && current.firstMoney === null) {
+          current.codes = current.codes.concat(codesHere);
+        } else {
+          current = { codes: codesHere.slice(), firstMoney: null, startedByCode: true };
+          groups.push(current);
+        }
+        continue;
+      }
+
+      if (isMoneyToken(tok) && current) {
+        if (current.firstMoney === null) current.firstMoney = toNum(tok);
+        continue;
+      }
+
+      if (CONTINUATION_RE.test(tok) && groups.length) {
+        current = { codes: groups[groups.length - 1].codes.slice(), firstMoney: null, startedByCode: false };
+        groups.push(current);
+      }
+    }
+    return groups;
+  }
 
   function parseAmountByCodeSection(text, codes) {
     text = despaceKeywords(String(text || ''));
     var unit_mult = detectUnitMult(headerText(text));
     var codeSet = codes && codes.length ? codes.slice() : null;
-    // 주의: 발코니/에어컨 섹션은 "묶음형"(여러 코드가 한 줄을 공유)이 흔하므로
-    // 가격 섹션과 달리 expandMegaLines(단일 코드 반복 기준 행분리)를 적용하지 않는다.
-    var ls = lines(text);
+    var tokens = text.split(/\s+/).filter(Boolean);
+    var groups = scanAmountGroups(tokens, codeSet);
 
     var candidates = {};
-    var currentCodes = [];
-
-    for (var i = 0; i < ls.length; i++) {
-      var line = ls[i];
-      var toks = tokenize(line);
-      var foundCodes = [];
-
-      if (codeSet) {
-        foundCodes = findCodesInLine(line, codeSet).codes;
-      } else {
-        for (var t = 0; t < toks.length; t++) {
-          if (SHORT_CODE_RE.test(toks[t])) { foundCodes = [toks[t]]; break; }
-        }
-        if (!foundCodes.length) {
-          for (var t3 = 0; t3 < toks.length; t3++) {
-            if (LONG_CODE_RE.test(toks[t3])) { foundCodes = [toks[t3]]; break; }
-          }
-        }
-      }
-
-      if (foundCodes.length) {
-        currentCodes = foundCodes;
-      } else if (currentCodes.length && (CONTINUATION_RE.test(line) || /^\d[\d,]*$/.test(toks[0] || ''))) {
-        // 코드 없이 이어지는 옵션 설명행(안/대수/기본/전실) -> 직전 코드 유지
-      } else {
-        currentCodes = [];
-      }
-
-      if (!currentCodes.length) continue;
-
-      var moneyToks = toks.filter(function (tk) {
-        return /^\d[\d,]*$/.test(tk) && tk.replace(/,/g, '').length >= 4;
-      }).map(toNum);
-      if (!moneyToks.length) continue;
-
-      currentCodes.forEach(function (c) {
-        candidates[c] = (candidates[c] || []).concat(moneyToks);
+    groups.forEach(function (g) {
+      if (g.firstMoney == null) return;
+      g.codes.forEach(function (c) {
+        candidates[c] = (candidates[c] || []).concat([g.firstMoney]);
       });
-    }
+    });
 
     var result = {};
     Object.keys(candidates).forEach(function (c) {

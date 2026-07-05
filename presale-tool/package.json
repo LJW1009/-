@@ -4,8 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "node run_tests.js && node run_tests_c.js && node run_tests_d.js && node test_excel.js",
-    "test:e2e": "node e2e_test.js",
+    "test": "node run_tests.js && node run_tests_c.js && node run_tests_d.js && node run_tests_e.js && node test_excel.js",
+    "test:e2e": "node e2e_test.js && node e2e_real_test.js",
     "build": "node build.js"
   },
   "keywords": [],
