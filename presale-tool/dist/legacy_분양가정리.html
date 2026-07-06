@@ -447,20 +447,30 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       return out2;
     }
 
-    // "합계/합 계" 총계행이 나오면 그 이전까지만 데이터로 취급 (마지막 주택형의 꼬리 오염 방지)
+    // "합계/합 계/계" 총계행이 나오면 그 이전까지만 데이터로 취급 (마지막 주택형의 꼬리 오염 방지).
+    // 바로 뒤에 "계" 한 글자만 오는 경우("계 24")는 마지막 경계 이후에 나올 때만 총계로 인정한다
+    // (다른 문맥의 "계" 단어와 혼동하지 않도록).
+    var lastBoundary = boundaries[boundaries.length - 1];
     var totalIdx = tokens.length;
     for (var ti = 0; ti < tokens.length; ti++) {
-      if (/^합계$/.test(tokens[ti]) || (/^합$/.test(tokens[ti]) && tokens[ti + 1] && /^계$/.test(tokens[ti + 1]))) {
-        totalIdx = ti; break;
-      }
+      var isTotalRow = /^합계$/.test(tokens[ti]) ||
+        (/^합$/.test(tokens[ti]) && tokens[ti + 1] && /^계$/.test(tokens[ti + 1])) ||
+        (/^계$/.test(tokens[ti]) && ti > lastBoundary && tokens[ti + 1] && /^\d+$/.test(tokens[ti + 1]));
+      if (isTotalRow) { totalIdx = ti; break; }
     }
 
     var out = [];
     for (var b = 0; b < boundaries.length; b++) {
-      var segStart = Math.max(0, boundaries[b] - 2);
+      // 1차 시도: 코드 자신부터 다음 경계 직전까지(이전 행 꼬리 오염 없음) - 대부분의 형식이 여기 해당.
+      var segStart = boundaries[b];
       var segEnd = (b + 1 < boundaries.length) ? boundaries[b + 1] : totalIdx;
       if (segEnd <= segStart) continue;
       var parsed = extractAreaFromTokens(tokens.slice(segStart, segEnd));
+      // 2차 시도(면적먼저형처럼 코드 앞에 전용면적이 오는 경우만): 코드 앞 2칸까지 넓혀 재시도.
+      if (!parsed) {
+        var segStart2 = Math.max(0, segStart - 2);
+        parsed = extractAreaFromTokens(tokens.slice(segStart2, segEnd));
+      }
       if (parsed) out.push(parsed);
     }
     return out;
@@ -520,40 +530,112 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   // ② 공급금액 및 납부일정
   // ---------------------------------------------------------------------
 
+  // 표가 행 경계에서 개행/공백 없이 그대로 붙어 복사되는 오염 교정:
+  // "189,000,0009층" -> "189,000,000 9층", "194,100,00084OB" -> "194,100,000 84OB"
+  // (제대로 된 3자리 콤마 구간 뒤에 여분의 숫자가 곧바로 붙으면 다음 행의 시작이다)
+  function fixGluedNumbers(text) {
+    return text.replace(/(\d{1,3}(?:,\d{3})+)(\d+)/g, '$1 $2');
+  }
+
+  // 헤더 라벨("중도금1차" 등)에 의존하지 않고, 연속된 날짜 토큰의 최장 구간을 중도금 납부일로 추출.
+  // 실제 공고문은 "계약 후 30일 이내 2026.12.28. 2027.05.28. ..." 처럼 날짜들이 라벨 없이
+  // 나열되는 경우가 많다.
+  function detectMidDatesGeneric(tokens) {
+    var best = [], cur = [];
+    for (var i = 0; i < tokens.length; i++) {
+      var d = parseFlexDate(tokens[i]);
+      if (d) { cur.push(d); } else { if (cur.length > best.length) best = cur; cur = []; }
+    }
+    if (cur.length > best.length) best = cur;
+    return best.slice(0, 6);
+  }
+
+  // 데이터 행 자체에서 "대지비+건축비+(부가세)=합계" 라는 내적 일관성으로 오프셋(합계 위치)과
+  // 행당 금액 컬럼 개수를 스스로 알아낸다. 헤더의 회차 라벨이 밀리거나 중복되는 등 깨져 있어도
+  // (예: "1차 2차 1차(10%) 2차(10%) 4차(10%) 4차(10%) 5차(10%) 6차(10%)") 영향을 받지 않는다.
+  function detectPriceColumnStructure(tokens) {
+    for (var i = 0; i < tokens.length; i++) {
+      if (!isFloorToken(tokens[i])) continue;
+      var unitsTok = tokens[i + 1];
+      if (!unitsTok || !/^\d{1,3}$/.test(unitsTok)) continue;
+      var run = [];
+      var j = i + 2;
+      while (j < tokens.length && isMoneyToken(tokens[j])) { run.push(toNum(tokens[j])); j++; }
+      if (run.length < 4) continue;
+      var candidates = [4, 3];
+      for (var ci = 0; ci < candidates.length; ci++) {
+        var oc = candidates[ci];
+        if (run.length <= oc) continue;
+        var sum = 0;
+        for (var s = 0; s < oc - 1; s++) sum += run[s];
+        if (Math.abs(sum - run[oc - 1]) <= 1000) {
+          return { offsetCount: oc, totalColumnCount: run.length };
+        }
+      }
+    }
+    return null;
+  }
+
   // 헤더가 "대지비 건축비 (부가세) 합계/소계/계 계약시 <날짜×6> 입주시" 형태로 각 컬럼의
-  // 의미를 명시하는 실제 공고문 형식을 위한 컬럼맵 빌더. 표 전체가 개행 없이 헤더+데이터가
-  // 하나로 이어진 경우에도, "대지비"부터 시작해 인식 가능한 라벨/날짜가 이어지는 동안만
-  // 컬럼으로 채택하고 첫 미인식 토큰에서 멈춰 그 지점을 데이터 시작점으로 삼는다.
+  // 의미를 명시하는 실제 공고문 형식을 위한 컬럼맵 빌더.
+  //
+  // 1) 우선 데이터 자체("대지비+건축비+(부가세)=합계")로 오프셋과 행당 컬럼 개수를 스스로
+  //    보정하는 방식을 시도한다(detectPriceColumnStructure) - 헤더 라벨이 아무리 복잡하거나
+  //    깨져 있어도(계약금이 여러 회차로 나뉘거나 회차 라벨이 밀려도) 영향을 받지 않는다.
+  // 2) 실패하면 "대지비"부터 토큰을 순서대로 읽어 인식 가능한 라벨/날짜가 이어지는 동안만
+  //    컬럼으로 채택하는 기존 방식으로 폴백한다.
   function buildPriceColumnMap(tokens, baseDate) {
+    var structure = detectPriceColumnStructure(tokens);
+    if (structure) {
+      var labeledDates = extractMidDates(tokens.join(' '), baseDate).filter(Boolean);
+      var genericDates = detectMidDatesGeneric(tokens);
+      var midDates = labeledDates.length >= genericDates.length ? labeledDates : genericDates;
+      var remaining = structure.totalColumnCount - structure.offsetCount;
+      var midCount = midDates.length ? Math.min(midDates.length, remaining) : Math.min(6, Math.max(0, remaining - 1));
+      var hasBalance = remaining - midCount >= 1;
+      var downCount = Math.max(0, remaining - midCount - (hasBalance ? 1 : 0));
+
+      var map = ['land', 'build'];
+      if (structure.offsetCount === 4) map.push('vat');
+      map.push('total');
+      for (var d1 = 0; d1 < downCount; d1++) map.push('down');
+      for (var d2 = 0; d2 < midCount; d2++) map.push('mid');
+      if (hasBalance) map.push('balance');
+
+      while (midDates.length < 6) midDates.push(null);
+      return { map: map, dataStart: 0, midDates: midDates.slice(0, 6) };
+    }
+
+    // 폴백: 헤더를 "대지비"부터 순서대로 읽는 방식
     var startIdx = -1;
     for (var i = 0; i < tokens.length; i++) {
       if (/대지비/.test(tokens[i])) { startIdx = i; break; }
     }
     if (startIdx === -1) return null;
 
-    var map = [];
-    var midDates = [];
+    var map2 = [];
+    var midDates2 = [];
     var j = startIdx;
     for (; j < tokens.length; j++) {
       var tok = tokens[j];
-      if (/대지비/.test(tok)) { map.push('land'); continue; }
-      if (/건축비/.test(tok)) { map.push('build'); continue; }
-      if (/부가가치세|부가세/.test(tok)) { map.push('vat'); continue; }
-      if (/^(합계|소계|계)$/.test(tok)) { map.push('total'); continue; }
-      if (/계약시/.test(tok)) { map.push('down'); continue; }
-      if (/^입주시$|^입주지정일$/.test(tok)) { map.push('balance'); j++; break; }
-      var d = parseFlexDate(tok);
-      if (d) { map.push('mid'); midDates.push(d); continue; }
+      if (/대지비/.test(tok)) { map2.push('land'); continue; }
+      if (/건축비/.test(tok)) { map2.push('build'); continue; }
+      if (/부가가치세|부가세/.test(tok)) { map2.push('vat'); continue; }
+      if (/^(합계|소계|계)$/.test(tok)) { map2.push('total'); continue; }
+      if (/계약시/.test(tok)) { map2.push('down'); continue; }
+      if (/^입주시$|^입주지정일$/.test(tok)) { map2.push('balance'); j++; break; }
+      var dd = parseFlexDate(tok);
+      if (dd) { map2.push('mid'); midDates2.push(dd); continue; }
       var off = baseDate ? parseRelativeOffset(tok) : null;
-      if (off) { map.push('mid'); midDates.push(applyOffset(baseDate, off)); continue; }
+      if (off) { map2.push('mid'); midDates2.push(applyOffset(baseDate, off)); continue; }
       break; // 인식 불가 토큰 -> 헤더 종료, 이 지점부터 데이터
     }
 
-    if (map.indexOf('land') === -1 || map.indexOf('build') === -1 || map.indexOf('total') === -1) return null;
-    if (map.filter(function (k) { return k === 'mid'; }).length < 1) return null;
+    if (map2.indexOf('land') === -1 || map2.indexOf('build') === -1 || map2.indexOf('total') === -1) return null;
+    if (map2.filter(function (k) { return k === 'mid'; }).length < 1) return null;
 
-    while (midDates.length < 6) midDates.push(null);
-    return { map: map, dataStart: j, midDates: midDates.slice(0, 6) };
+    while (midDates2.length < 6) midDates2.push(null);
+    return { map: map2, dataStart: j, midDates: midDates2.slice(0, 6) };
   }
 
   function isDongToken(tok) {
@@ -597,7 +679,9 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
             var values = { mid: [] };
             colMap.forEach(function (kind, ci) {
               var v = toNum(slice[ci]) * unit_mult;
-              if (kind === 'mid') values.mid.push(v); else values[kind] = v;
+              if (kind === 'mid') values.mid.push(v);
+              else if (kind === 'down') values.down = (values.down || 0) + v;
+              else values[kind] = v;
             });
             rows.push({
               code: currentCode,
@@ -625,7 +709,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   }
 
   function parsePriceSection(text, codes, baseDate) {
-    text = despaceKeywords(String(text || ''));
+    text = fixGluedNumbers(despaceKeywords(String(text || '')));
     var hdr = parseTableHeader(text, baseDate);
     var unit_mult = hdr.unit_mult;
     var codeSet = codes && codes.length ? codes.slice() : null;
@@ -812,7 +896,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     if (openM) open_date = parseFlexDate(openM[1]);
     if (!open_date) {
       // "...-12156호(2024.02.28.)로 입주자모집공고 승인" 처럼 승인/신고 문구 앞의 날짜로 공고일을 대신 표기하는 경우
-      var openM2 = text.match(/(\d{4}[.\-/]\d{1,2}[.\-/]\d{1,2})\s*\.?\s*[).）][^\n]{0,40}(?:입주자\s*모집\s*공고\s*승인|분양\s*신고\s*처리|분양\s*신고|승인|신고)/);
+      var openM2 = text.match(/(\d{4}[.\-/]\s*\d{1,2}[.\-/]\s*\d{1,2})\s*\.?\s*[).）][^\n]{0,40}(?:입주자\s*모집\s*공고\s*승인|분양\s*신고\s*처리|분양\s*신고|승인|신고)/);
       if (openM2) open_date = parseFlexDate(openM2[1]);
     }
 
