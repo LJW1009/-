@@ -650,8 +650,14 @@
 
     var openM = text.match(/(?:입주자\s*모집\s*)?공고일\s*[:：]?\s*([0-9.\-/년월일\s]{6,20})/);
     if (openM) open_date = parseFlexDate(openM[1]);
+    if (!open_date) {
+      // "...-12156호(2024.02.28.)로 입주자모집공고 승인" 처럼 승인/신고 문구 앞의 날짜로 공고일을 대신 표기하는 경우
+      var openM2 = text.match(/(\d{4}[.\-/]\d{1,2}[.\-/]\d{1,2})\s*\.?\s*[).）][^\n]{0,40}(?:입주자\s*모집\s*공고\s*승인|분양\s*신고\s*처리|분양\s*신고|승인|신고)/);
+      if (openM2) open_date = parseFlexDate(openM2[1]);
+    }
 
-    var moveM = text.match(/입주\s*예정\s*(?:월|일|시기)?\s*[:：]?\s*(\d{4})\s*[년.\-]\s*(\d{1,2})\s*월?/);
+    // "입주예정월", "입주예정일", "입주시기"(예정 없이) 등 표기 변형 모두 지원
+    var moveM = text.match(/입주\s*(?:예정\s*)?(?:월|일|시기)?\s*[:：]?\s*(\d{4})\s*[년.\-]\s*(\d{1,2})\s*월?/);
     if (moveM) {
       move_in_year = Number(moveM[1]);
       move_in_month = Number(moveM[2]);

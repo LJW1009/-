@@ -12,7 +12,7 @@ const { TEXT } = require('./test_cases_e.js');
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
 
-  await page.goto('file://' + path.join(__dirname, 'dist', '분양가정리.html'));
+  await page.goto('file://' + path.join(__dirname, 'dist', 'legacy_분양가정리.html'));
   await page.fill('#f-name', '더폴 울산신정');
   await page.selectOption('#f-r1', '경남');
   await page.fill('#f-r2', '울산 남구');

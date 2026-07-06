@@ -23,6 +23,8 @@ html = html.replace(
 
 const outDir = path.join(dir, 'dist');
 fs.mkdirSync(outDir, { recursive: true });
-const outPath = path.join(outDir, '분양가정리.html');
+// 주의: 기본 산출물 경로(dist/분양가정리.html)는 build_v65.js(현재 기본 UI) 전용이다.
+// 레거시 UI는 별도 파일로 출력해 두 빌드가 서로 덮어쓰지 않게 한다.
+const outPath = path.join(outDir, 'legacy_분양가정리.html');
 fs.writeFileSync(outPath, html, 'utf8');
-console.log('빌드 완료:', outPath, '(' + (fs.statSync(outPath).size / 1024).toFixed(0) + ' KB)');
+console.log('빌드 완료(레거시 UI):', outPath, '(' + (fs.statSync(outPath).size / 1024).toFixed(0) + ' KB)');

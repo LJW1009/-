@@ -5,25 +5,33 @@
 
 ## 구조
 
+프론트엔드는 두 벌이 있다. **`app_v65_source.html` 기반이 현재 기본(canonical) UI**이고
+(`npm run build`가 이걸 조립한다), `app.html`/`logic.js` 기반은 초기 버전으로 남겨뒀다
+(`npm run build:legacy`). 파서/엑셀 엔진(`parser.js`)은 두 UI가 공유한다.
+
 | 파일 | 역할 |
 |---|---|
-| `parser.js` | 파서: `parseAreaSection`, `parsePriceSection`, `parseBalconySection`, `parseOptionSection`, `extractMeta` |
-| `excel.js` | 엑셀 빌더: `buildBlock(sd, merges, rh, unit, startRow)` |
-| `app.html` / `logic.js` | 프론트엔드 (입력 탭 / 결과·수정 탭) |
+| `parser.js` | 파서(공유 엔진): `parseAreaSection`, `parsePriceSection`, `parseBalconySection`, `parseOptionSection`, `extractMeta` |
+| `excel.js` | (레거시 UI용) 엑셀 빌더: `buildBlock(sd, merges, rh, unit, startRow)` |
+| `app_v65_source.html` | **기본 UI** 원본(다크테마, 사이드바 지역트리, 데이터수정/원본 탭, 삭제, 37열 엑셀 서식 등 포함). 내부 파서 구간은 build 시 제거되고 `parser.js`+`adapter_v65.js`로 교체됨 |
+| `adapter_v65.js` | `app_v65_source.html`이 기대하는 호출 규약(`parsePriceSection`이 code→rows 맵을 반환, `extractMeta`가 날짜를 문자열로 반환 등)으로 `parser.js`를 감싸는 얇은 어댑터 |
+| `build_v65.js` | **기본 빌드**: `app_v65_source.html`의 옛 파서 구간을 제거하고 `parser.js`+`adapter_v65.js`를 삽입해 `dist/분양가정리.html` 생성 |
+| `app.html` / `logic.js` / `build.js` | 레거시 UI 및 빌드 (참고용으로 유지) |
 | `test_cases.js`, `test_cases_c.js`, `test_cases_d.js`, `test_cases_e.js` | 파서 단위/통합/실사례 회귀 테스트 (총 84개) |
 | `run_tests.js`, `run_tests_c.js`, `run_tests_d.js`, `run_tests_e.js` | 테스트 실행기 |
-| `test_excel.js` | 엑셀 빌더 검증 (Node `xlsx` 패키지 사용) |
-| `e2e_test.js`, `e2e_real_test.js` | 브라우저(Playwright) 종단 테스트 (합성 데이터 / 실제 공고문 원문) |
-| `build.js` | 최종 조합: SheetJS + parser + excel + logic을 `app.html`에 인라인하여 `dist/분양가정리.html` 생성 |
+| `test_excel.js` | 엑셀 빌더 검증 (Node `xlsx` 패키지 사용, 레거시 UI의 `excel.js` 대상) |
+| `e2e_test.js`, `e2e_real_test.js` | 레거시 UI 브라우저(Playwright) 종단 테스트 |
+| `e2e_v65_test.js` | **기본 UI** 브라우저 종단 테스트 (실제 원문으로 분석→추가→요약/수정/원본 탭→삭제→엑셀/JSON 다운로드까지 검증) |
 | `vendor/xlsx.full.min.js` | SheetJS 번들 (오프라인 사용을 위해 체크인됨) |
 
 ## 실행
 
 ```bash
-npm install          # xlsx(테스트용), playwright(E2E용)
-npm test             # 파서 84/84 + 엑셀 빌더 검증
-npm run test:e2e     # 브라우저 종단 테스트 (합성 데이터 + 실제 공고문 원문)
-npm run build        # dist/분양가정리.html 생성
+npm install              # xlsx(테스트용), playwright(E2E용)
+npm test                 # 파서 84/84 + 엑셀 빌더 검증
+npm run test:e2e         # 브라우저 종단 테스트 (기본 UI + 레거시 UI, 합성/실제 데이터)
+npm run build            # dist/분양가정리.html 생성 (기본 UI, app_v65_source.html 기반)
+npm run build:legacy     # 레거시 UI로 다시 빌드하고 싶을 때만 사용
 ```
 
 `dist/분양가정리.html`은 외부 리소스 없이 그대로 브라우저에서 열어 사용할 수 있는

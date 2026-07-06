@@ -72,6 +72,22 @@ module.exports = [
       return balcony['84A'] === 23000000 && balcony['84B'] === 23000000
         && option['84A'] === 4070000 && option['84B'] === 4070000;
     }
+  },
+  {
+    id: 'E07',
+    desc: '실사례 공고일: "공고일" 키워드 없이 "...날짜(...)로 입주자모집공고 승인" 형태로만 표기된 경우',
+    run: function (p) {
+      var meta = p.extractMeta('울산광역시 남구 건축허가과 -12156호(2024.02.28.)로 입주자모집공고 승인');
+      return meta.open_date && meta.open_date.getFullYear() === 2024 && meta.open_date.getMonth() === 1 && meta.open_date.getDate() === 28;
+    }
+  },
+  {
+    id: 'E08',
+    desc: '실사례 입주예정: "입주예정월/일" 없이 "입주시기"만 표기된 경우',
+    run: function (p) {
+      var meta = p.extractMeta('■ 입주시기 : 2027년 02월 예정(정확한 입주일자는 추후 통보함)');
+      return meta.move_in_year === 2027 && meta.move_in_month === 2;
+    }
   }
 ];
 

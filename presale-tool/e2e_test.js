@@ -27,7 +27,7 @@ const SAMPLE_OPTION = '084.9750A   3,200,000\n059.9700B   2,100,000';
   page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
   page.on('console', (msg) => { if (msg.type() === 'error') errors.push('console.error: ' + msg.text()); });
 
-  const filePath = 'file://' + path.join(__dirname, 'dist', '분양가정리.html');
+  const filePath = 'file://' + path.join(__dirname, 'dist', 'legacy_분양가정리.html');
   await page.goto(filePath);
 
   await page.fill('#f-name', '테스트단지');
