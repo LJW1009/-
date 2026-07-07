@@ -17,8 +17,8 @@
 | `adapter_v65.js` | `app_v65_source.html`이 기대하는 호출 규약(`parsePriceSection`이 code→rows 맵을 반환, `extractMeta`가 날짜를 문자열로 반환 등)으로 `parser.js`를 감싸는 얇은 어댑터 |
 | `build_v65.js` | **기본 빌드**: `app_v65_source.html`의 옛 파서 구간을 제거하고 `parser.js`+`adapter_v65.js`를 삽입해 `dist/분양가정리.html` 생성 |
 | `app.html` / `logic.js` / `build.js` | 레거시 UI 및 빌드 (참고용으로 유지) |
-| `test_cases.js`~`test_cases_h.js` | 파서 단위/통합/실사례/범용성 회귀 테스트 (총 102개) |
-| `run_tests.js`~`run_tests_h.js` | 테스트 실행기 |
+| `test_cases.js`~`test_cases_i.js` | 파서 단위/통합/실사례/범용성 회귀 테스트 (총 107개) |
+| `run_tests.js`~`run_tests_i.js` | 테스트 실행기 |
 | `test_excel.js` | 엑셀 빌더 검증 (Node `xlsx` 패키지 사용, 레거시 UI의 `excel.js` 대상) |
 | `e2e_test.js`, `e2e_real_test.js` | 레거시 UI 브라우저(Playwright) 종단 테스트 |
 | `e2e_v65_test.js`, `e2e_v65_songdo_test.js`, `e2e_v65_goyang_test.js` | **기본 UI** 브라우저 종단 테스트 (실제 원문 3건으로 분석→추가→요약/수정/원본 탭→삭제→엑셀/JSON 다운로드까지 검증) |
@@ -28,7 +28,7 @@
 
 ```bash
 npm install              # xlsx(테스트용), playwright(E2E용)
-npm test                 # 파서 102/102 + 엑셀 빌더 검증
+npm test                 # 파서 107/107 + 엑셀 빌더 검증
 npm run test:e2e         # 브라우저 종단 테스트 (기본 UI + 레거시 UI, 합성/실제 데이터)
 npm run build            # dist/분양가정리.html 생성 (기본 UI, app_v65_source.html 기반)
 npm run build:legacy     # 레거시 UI로 다시 빌드하고 싶을 때만 사용
@@ -94,16 +94,26 @@ npm run build:legacy     # 레거시 UI로 다시 빌드하고 싶을 때만 사
   ("059.0000A" 안에 59AL/59A/59AH가 각기 다른 면적·세대수로 존재)도 지원한다.
   짧은형 코드를 우선 경계로 삼아(긴 코드는 짧은형이 전혀 없을 때만 폴백) 하위타입이
   뭉개지지 않게 한다.
+- **"소계" 중간값이 아예 인쇄되지 않는 공급면적표**(전용/공용/기타공용/주차장면적
+  4개 값을 모두 더해야만 계약면적이 되고, 그 사이 어떤 3항 조합도 서로 합이 맞지
+  않는 경우)도 `findAreaTriple`이 3개 미만 매칭 시 폴백하는 코드숫자-근접도
+  휴리스틱으로 여전히 전용면적/계약면적을 정확히 골라낸다. 타입 코드의 영문 접미사가
+  2글자를 넘는 경우("65GTB", "66GTA"처럼 3글자)도 `SHORT_CODE_RE`가 코드 경계로
+  인식하도록 접미사 길이 제한을 2글자→3글자로 넓혔다(고치기 전에는 이런 코드가
+  아예 경계로 잡히지 않아 인접 타입의 면적값을 덮어쓰는 회귀가 있었다).
+- **계약금이 "계약 시"/"계약 후 N일 이내" 두 컬럼으로 쪼개져 있고 중도금이 5회
+  균등분할인 가격표** — `readMoneyRun`/`buildPriceColumnMap`이 이미 down 컬럼 여러 개를
+  합산하도록 일반화돼 있어 별도 수정 없이 정확히 동작함을 실사례로 확인했다.
 
 `test_cases_g.js`(4건)와 `test_cases_h.js`(6건)는 지금까지 확인된 어떤 실제 사례에도
 없던(g) 또는 세 번째 실사례에서 발견된(h) 조합이다 — 특정 사례에 맞춘 패치가 아니라
-메커니즘 자체가 일반화됐는지 검증하기 위한 것이다. 실제 확인된 10개 단지 분양공고
+메커니즘 자체가 일반화됐는지 검증하기 위한 것이다. 실제 확인된 11개 단지 분양공고
 사례(의정부역 센트럴 아이파크, 영통역 우미린, 김포 풍무 레이크에듀시티, 번영로
 롯데캐슬, 더폴 우정, 더샵 송도그란테르(아파트), 힐스테이트 안양 펠루스, 더폴
-울산신정, 더샵 송도그란테르 G5-3블록(오피스텔), 고양창릉 S-4블록(공공분양))도
-`test_cases_d.js`~`test_cases_h.js`로 회귀 고정했다(`e2e_real_test.js`,
-`e2e_v65_test.js`, `e2e_v65_songdo_test.js`, `e2e_v65_goyang_test.js`로 브라우저
-UI까지 검증).
+울산신정, 더샵 송도그란테르 G5-3블록(오피스텔), 고양창릉 S-4블록(공공분양),
+힐스테이트 둔산 오피스텔)도 `test_cases_d.js`~`test_cases_i.js`로 회귀 고정했다
+(`e2e_real_test.js`, `e2e_v65_test.js`, `e2e_v65_songdo_test.js`,
+`e2e_v65_goyang_test.js`, `e2e_v65_hillstate_test.js`로 브라우저 UI까지 검증).
 
 ### 여전히 남아있는 제한사항
 

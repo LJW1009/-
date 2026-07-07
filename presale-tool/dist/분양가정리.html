@@ -389,7 +389,7 @@ function dateSerial(dt) {
   }
 
   // 짧은형 코드: 84A, 54A1, 84OA, 200A, 84O 등 (점(.) 없는 숫자+영문 조합)
-  var SHORT_CODE_RE = /^\d{2,4}[A-Za-z]{1,2}\d{0,2}$/;
+  var SHORT_CODE_RE = /^\d{2,4}[A-Za-z]{1,3}\d{0,2}$/;
   // 긴 소수형 코드: 059.9700A (문자 접미사 필수 - 없으면 순수 면적값과 구분 불가)
   var LONG_CODE_RE = /^\d{2,3}\.\d{2,4}[A-Za-z]{1,2}$/;
 
