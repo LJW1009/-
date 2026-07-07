@@ -914,6 +914,75 @@
   }
 
   // ---------------------------------------------------------------------
+  // PDF 전체 원문에서 4개 섹션(공급면적/공급금액/발코니/옵션) 경계 자동 분리
+  //
+  // 실제 분양광고 PDF들은 예외 없이 "■"(U+25A0) 또는 "▣"(U+25A3) 불릿으로 시작하는
+  // 섹션 제목 뒤에 해당 표가 곧바로 이어지는 관례를 따른다(디스클레이머 불릿은 "⦁"/"•"
+  // 등 다른 문자를 쓰므로 섞이지 않는다). 이 불릿+제목 조합을 앵커로 삼아 각 섹션의
+  // 시작 위치를 찾고, 다음 앵커(또는 "청약신청자격 및 공급일정"처럼 명확한 다음
+  // 대분류 제목) 직전까지를 그 섹션 텍스트로 자른다. 앵커를 못 찾으면 빈 문자열을
+  // 반환하므로, 호출측(UI)에서 실패 시 원문 전체를 보여주고 사용자가 직접 붙여넣기로
+  // 대체할 수 있게 해야 한다.
+  // ---------------------------------------------------------------------
+
+  var SECTION_ANCHORS = {
+    area: [/[■▣]\s*공급대상\s*(?:및\s*공급규모)?(?!물)/],
+    price: [/[■▣]\s*공급금액\s*및\s*납부일정/, /[■▣]\s*분양가격\s*납부조건\s*등?\s*안내/, /[■▣]\s*공급금액\s*납부조건\s*등?\s*안내/],
+    balcony: [/[■▣]\s*발코니\s*확장/],
+    option: [/[■▣]\s*추가\s*선택\s*옵션품목/, /[■▣]\s*추가선택\s*옵션품목/, /[■▣]\s*옵션품목/, /[■▣]\s*추가\s*선택품목/]
+  };
+  var NEXT_MAJOR_SECTION_RE = /청약신청\s*자격\s*및\s*공급일정/;
+
+  function findEarliestMatch(text, patterns, fromIndex) {
+    var searchFrom = fromIndex || 0;
+    var sub = text.slice(searchFrom);
+    var best = -1;
+    for (var i = 0; i < patterns.length; i++) {
+      var m = sub.match(patterns[i]);
+      if (m && m.index != null) {
+        var idx = searchFrom + m.index;
+        if (best === -1 || idx < best) best = idx;
+      }
+    }
+    return best;
+  }
+
+  function sliceSection(text, start, endCandidates) {
+    if (start < 0) return '';
+    var end = text.length;
+    for (var i = 0; i < endCandidates.length; i++) {
+      var c = endCandidates[i];
+      if (c >= 0 && c > start && c < end) end = c;
+    }
+    return text.slice(start, end).trim();
+  }
+
+  function splitDocumentSections(fullText) {
+    var text = String(fullText || '');
+    var areaStart = findEarliestMatch(text, SECTION_ANCHORS.area, 0);
+    var priceSearchFrom = areaStart >= 0 ? areaStart + 1 : 0;
+    var priceStart = findEarliestMatch(text, SECTION_ANCHORS.price, priceSearchFrom);
+    var afterPrice = priceStart >= 0 ? priceStart + 1 : priceSearchFrom;
+    var balconyStart = findEarliestMatch(text, SECTION_ANCHORS.balcony, afterPrice);
+    var optionSearchFrom = balconyStart >= 0 ? balconyStart + 1 : afterPrice;
+    var optionStart = findEarliestMatch(text, SECTION_ANCHORS.option, optionSearchFrom);
+    var nextMajorStart = findEarliestMatch(text, [NEXT_MAJOR_SECTION_RE], afterPrice);
+
+    var area = sliceSection(text, areaStart, [priceStart]);
+    var price = sliceSection(text, priceStart, [balconyStart, optionStart, nextMajorStart]);
+    var balcony = sliceSection(text, balconyStart, [optionStart, nextMajorStart]);
+    var option = sliceSection(text, optionStart, [nextMajorStart]);
+
+    return {
+      area: area,
+      price: price,
+      balcony: balcony,
+      option: option,
+      found: { area: areaStart >= 0, price: priceStart >= 0, balcony: balconyStart >= 0, option: optionStart >= 0 }
+    };
+  }
+
+  // ---------------------------------------------------------------------
   // export
   // ---------------------------------------------------------------------
 
@@ -923,6 +992,7 @@
     parseBalconySection: parseBalconySection,
     parseOptionSection: parseOptionSection,
     extractMeta: extractMeta,
+    splitDocumentSections: splitDocumentSections,
     // 디버그/QA용 내부 함수 노출
     parseTableHeader: parseTableHeader,
     parseFloorDesc: parseFloorDesc,

@@ -1,5 +1,5 @@
 /*
- * v6.5 기반 산출물(dist/분양가정리.html) 브라우저 종단 테스트 - 네 번째 실사례(힐스테이트 둔산 오피스텔).
+ * v6.5 기반 산출물(dist/분양가정리.html) 브라우저 종단 테스트 - 네 번째 실사례(시화MTV 푸르지오 디오션 오피스텔).
  * test_cases_i.js의 실제 텍스트를 재사용해, "소계" 없이 4항목을 더해야 하는 공급면적 구조와
  * 영문 3글자 접미사 타입코드(65GTB 등), 계약금 2분할+중도금 5회 가격구조가 UI에서도 정상 동작하는지 검증한다.
  */
@@ -16,9 +16,9 @@ const { TEXT } = require('./test_cases_i.js');
 
   await page.goto('file://' + path.join(__dirname, 'dist', '분양가정리.html'));
 
-  await page.fill('#inp-name', '힐스테이트 둔산 오피스텔');
-  await page.selectOption('#inp-r1', '대전광역시');
-  await page.fill('#inp-r2', '서구 탄방동');
+  await page.fill('#inp-name', '시화MTV 푸르지오 디오션 오피스텔');
+  await page.selectOption('#inp-r1', '경기도');
+  await page.fill('#inp-r2', '시흥시 정왕동');
   await page.selectOption('#inp-kind', '오피스텔');
   await page.fill('#ta-area', TEXT.AREA_TEXT);
   await page.fill('#ta-price', TEXT.PRICE_TEXT);
@@ -43,7 +43,7 @@ const { TEXT } = require('./test_cases_i.js');
     throw new Error(errors.length + '건 에러 발생');
   }
 
-  console.log('\n✅ 힐스테이트 둔산 실사례 E2E 통과');
+  console.log('\n✅ 시화MTV 푸르지오 디오션 실사례 E2E 통과');
   await browser.close();
 })().catch((e) => {
   console.error('❌ 실패:', e.message);
