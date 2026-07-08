@@ -47,8 +47,8 @@
     return /^-?\d[\d,]*(\.\d+)?$/.test(String(tok).trim());
   }
 
-  // 짧은형 코드: 84A, 54A1, 84OA, 200A, 84O 등 (점(.) 없는 숫자+영문 조합)
-  var SHORT_CODE_RE = /^\d{2,4}[A-Za-z]{1,3}\d{0,2}$/;
+  // 짧은형 코드: 84A, 54A1, 84OA, 200A, 84O, 84E1-T(하이픈 접미사) 등 (점(.) 없는 숫자+영문 조합)
+  var SHORT_CODE_RE = /^\d{2,4}[A-Za-z]{1,3}\d{0,2}(?:-[A-Za-z]{1,3})?$/;
   // 긴 소수형 코드: 059.9700A (문자 접미사 필수 - 없으면 순수 면적값과 구분 불가)
   var LONG_CODE_RE = /^\d{2,3}\.\d{2,4}[A-Za-z]{1,2}$/;
 
@@ -431,12 +431,18 @@
   // midCount개 연속되는" 지점을 찾는다. 중도금 회차는 보통 동일 금액(회차별 균등분할)이므로,
   // 이 지점이 곧 mid 블록의 실제 위치다 - down/balance 컬럼 개수를 위치가 아니라 값의
   // 성질로 알아내므로, "잔금 뒤에 융자금처럼 추가 컬럼이 더 있는" 경우에도 정확하다.
+  //
+  // 변동폭은 절대값이 아니라 평균 대비 비율(상대편차)로 비교한다. 절대편차로 비교하면
+  // "계약금(5%+5%)"처럼 다른 구간보다 원래 금액 자체가 작은 구간이, 실제로는 두 값의
+  // 차이가 훨씬 큰 비율인데도(예: 500만 vs 4,295만, 약 8.6배 차이) 절대적인 액수 차이가
+  // 작다는 이유만으로 "가장 고르게 분할된 구간"으로 잘못 뽑히는 사례가 실사례에서 확인됐다
+  // (중도금이 "1차 40% + 2차 10%"처럼 회차별 비율이 다른 경우).
   function findMidBlockStart(run, offsetCount, midCount) {
     var best = -1, bestVariance = Infinity;
     for (var start = offsetCount; start + midCount <= run.length; start++) {
       var slice = run.slice(start, start + midCount);
       var avg = slice.reduce(function (a, b) { return a + b; }, 0) / slice.length;
-      var variance = slice.reduce(function (a, b) { return a + Math.abs(b - avg); }, 0);
+      var variance = slice.reduce(function (a, b) { return a + Math.abs(b - avg); }, 0) / (avg || 1);
       // 동률(예: 계약금이 우연히 중도금 회차와 같은 금액)이면 더 뒤쪽 위치를 택한다 -
       // 계약금은 관례상 합계 바로 뒤 한 칸이고 중도금 블록은 그다음부터 시작되므로.
       if (variance <= bestVariance) { bestVariance = variance; best = start; }
@@ -581,7 +587,9 @@
   function isFloorToken(tok) {
     // 콤마 구분 금액("60,857" 등)은 층 목록("5,7,9")과 형태가 겹치므로 먼저 배제한다.
     if (isMoneyToken(tok)) return false;
-    return /층/.test(tok) || /^\d+([~\-,]\d+)*$/.test(tok);
+    // 끝에 붙은 콤마/물결/붙임표("11," "5~" 등)까지 허용 - "11, 15층"처럼 층 목록이
+    // 공백을 사이에 두고 여러 토큰으로 쪼개진 경우의 앞부분을 인식하기 위함.
+    return /층/.test(tok) || /^\d+([~\-,]\d+)*[~\-,]?$/.test(tok);
   }
   // 층 토큰이 공백을 두고 이어지는 경우("5층~ 최상층"의 "최상층"): 층 표기의 연속으로 간주.
   function isFloorContinuation(tok) {
@@ -600,10 +608,13 @@
   // 금액이 이어지는 경우까지 모두 지원(공급세대수 컬럼 자체가 없는 표 대응).
   function skipFloorPrefix(tokens, i) {
     var p = i + 1;
-    // 연속 토큰 흡수는 시작 토큰 자체가 이미 명확한 층 표기("층" 포함)일 때만 시도한다.
-    // 순수 숫자 하나("2")는 세대수·코드 부속값 등 다른 의미일 수 있어, 그 다음에 오는
-    // 진짜 층 토큰("5층")까지 잘못 흡수하지 않도록 막는다.
-    if (/층/.test(tokens[i])) {
+    // "11," "15층"처럼 층 목록이 공백을 사이에 두고 여러 토큰으로 쪼개진 경우: 직전
+    // 토큰이 콤마/물결/붙임표로 끝나는 동안은 계속 같은 층 목록의 일부로 흡수한다.
+    while (/[~\-,]$/.test(tokens[p - 1]) && tokens[p] && isFloorToken(tokens[p])) p++;
+    // 연속 토큰 흡수는 지금까지 흡수한 부분에 이미 명확한 층 표기("층" 포함)가 있을
+    // 때만 시도한다. 순수 숫자 하나("2")는 세대수·코드 부속값 등 다른 의미일 수 있어,
+    // 그 다음에 오는 진짜 층 토큰("5층")까지 잘못 흡수하지 않도록 막는다.
+    if (/층/.test(tokens[i]) || /층/.test(tokens[p - 1])) {
       while (tokens[p] && isFloorContinuation(tokens[p])) p++;
     }
     return p;

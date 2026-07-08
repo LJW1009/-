@@ -20,22 +20,22 @@
 | `adapter_v65.js` | `app_v65_source.html`이 기대하는 호출 규약(`parsePriceSection`이 code→rows 맵을 반환, `extractMeta`가 날짜를 문자열로 반환 등)으로 `parser.js`를 감싸는 얇은 어댑터 |
 | `build_v65.js` | **기본 빌드**: `app_v65_source.html`의 옛 파서 구간을 제거하고 `parser.js`+`adapter_v65.js`를 삽입해 `dist/분양가정리.html` 생성 |
 | `app.html` / `logic.js` / `build.js` | 레거시 UI 및 빌드 (참고용으로 유지) |
-| `test_cases.js`~`test_cases_i.js` | 파서 단위/통합/실사례/범용성 회귀 테스트 (총 107개) |
-| `run_tests.js`~`run_tests_i.js` | 테스트 실행기 |
+| `test_cases.js`~`test_cases_j.js` | 파서 단위/통합/실사례/범용성 회귀 테스트 (총 111개) |
+| `run_tests.js`~`run_tests_j.js` | 테스트 실행기 |
 | `test_excel.js` | 엑셀 빌더 검증 (Node `xlsx` 패키지 사용, 레거시 UI의 `excel.js` 대상) |
 | `test_pdf_extract.js` | PDF 첨부 자동인식 파이프라인(텍스트 추출→섹션 분리→파서) Node 통합 검증 |
 | `e2e_test.js`, `e2e_real_test.js` | 레거시 UI 브라우저(Playwright) 종단 테스트 |
 | `e2e_v65_test.js`, `e2e_v65_songdo_test.js`, `e2e_v65_goyang_test.js`, `e2e_v65_sihwamtv_test.js` | **기본 UI** 브라우저 종단 테스트 (실제 원문 4건으로 분석→추가→요약/수정/원본 탭→삭제→엑셀/JSON 다운로드까지 검증) |
-| `e2e_pdf_upload_test.js` | **PDF 첨부** 브라우저 종단 테스트 (실제 파일 입력에 실사례 PDF를 첨부해 자동 인식까지 검증) |
+| `e2e_pdf_upload_test.js`, `e2e_v65_hillstate_dunsan_test.js` | **PDF 첨부** 브라우저 종단 테스트 (실제 파일 입력에 실사례 PDF를 첨부해 자동 인식→분석→추가까지 검증) |
 | `vendor/xlsx.full.min.js` | SheetJS 번들 (오프라인 사용을 위해 체크인됨) |
 | `vendor/pdfjs.min.js`, `vendor/pdfjs.worker.min.js` | pdf.js(Mozilla) legacy 빌드 - PDF 텍스트 추출용, `app_v65_source.html`에 직접 인라인됨 |
-| `fixtures/*.pdf` | PDF 첨부 기능 테스트용 실사례 분양광고 PDF |
+| `fixtures/*.pdf` | PDF 첨부 기능 테스트용 실사례 분양광고 PDF (시화MTV 푸르지오 디오션 오피스텔, 힐스테이트 둔산 오피스텔) |
 
 ## 실행
 
 ```bash
 npm install              # xlsx/pdfjs-dist(테스트용), playwright(E2E용)
-npm test                 # 파서 107/107 + 엑셀 빌더 + PDF 추출 파이프라인 검증
+npm test                 # 파서 111/111 + 엑셀 빌더 + PDF 추출 파이프라인 검증
 npm run test:e2e         # 브라우저 종단 테스트 (기본 UI + 레거시 UI + PDF 첨부, 합성/실제 데이터)
 npm run build            # dist/분양가정리.html 생성 (기본 UI, app_v65_source.html 기반)
 npm run build:legacy     # 레거시 UI로 다시 빌드하고 싶을 때만 사용
@@ -161,16 +161,31 @@ npm run build:legacy     # 레거시 UI로 다시 빌드하고 싶을 때만 사
 - **계약금이 "계약 시"/"계약 후 N일 이내" 두 컬럼으로 쪼개져 있고 중도금이 5회
   균등분할인 가격표** — `readMoneyRun`/`buildPriceColumnMap`이 이미 down 컬럼 여러 개를
   합산하도록 일반화돼 있어 별도 수정 없이 정확히 동작함을 실사례로 확인했다.
+- **타입 코드에 하이픈+영문 접미사가 붙는 경우**("84E1-T", "84E2-T"처럼 짧은형 코드
+  뒤에 "-T" 등이 더 붙음): `SHORT_CODE_RE`에 `(?:-[A-Za-z]{1,3})?` 선택 그룹을 추가해
+  일반화했다(고치기 전에는 코드 경계로 아예 인식되지 않아 해당 타입 전체가 누락됐다).
+- **중도금이 회차별로 불균등 분할된 가격표**("1차중도금 40%+2차중도금 10%"처럼 두
+  중도금 회차의 금액 규모가 다름): 대지비/건축비 분리 표기가 없어 "값이 서로 거의
+  같게 반복되는 구간"으로 중도금 블록을 찾는 `findMidBlockStart`가, 절대 편차 합으로
+  비교하면 절대값이 작은 계약금(5%+5%) 구간을 상대적으로 "더 고르다"고 오판해 중도금
+  구간 대신 골라버리는 문제가 있었다. 구간 평균 대비 상대 편차로 비교하도록 일반화해
+  해결했다(고치기 전에는 계약금/중도금/잔금이 전부 뒤바뀌어 나왔다).
+- **콤마 뒤 공백으로 두 토큰에 걸쳐 쪼개지는 층 목록**("11, 15층"이 토큰화 시 "11,"과
+  "15층"으로 분리됨): 층 토큰 인식(`isFloorToken`)이 끝에 콤마/물결/붙임표만 남은
+  토큰("11,")을 층 표기로 인정하지 않아, 뒤 토큰("15층")만 남고 앞부분이 통째로
+  유실되는 문제가 있었다. 끝에 붙은 구분자로 끝나는 토큰을 층 목록의 계속되는 부분으로
+  인식하도록 `isFloorToken`/`skipFloorPrefix`를 일반화했다.
 
 `test_cases_g.js`(4건)와 `test_cases_h.js`(6건)는 지금까지 확인된 어떤 실제 사례에도
 없던(g) 또는 세 번째 실사례에서 발견된(h) 조합이다 — 특정 사례에 맞춘 패치가 아니라
-메커니즘 자체가 일반화됐는지 검증하기 위한 것이다. 실제 확인된 11개 단지 분양공고
+메커니즘 자체가 일반화됐는지 검증하기 위한 것이다. 실제 확인된 12개 단지 분양공고
 사례(의정부역 센트럴 아이파크, 영통역 우미린, 김포 풍무 레이크에듀시티, 번영로
 롯데캐슬, 더폴 우정, 더샵 송도그란테르(아파트), 힐스테이트 안양 펠루스, 더폴
 울산신정, 더샵 송도그란테르 G5-3블록(오피스텔), 고양창릉 S-4블록(공공분양),
-시화MTV 푸르지오 디오션 오피스텔)도 `test_cases_d.js`~`test_cases_i.js`로 회귀 고정했다
-(`e2e_real_test.js`, `e2e_v65_test.js`, `e2e_v65_songdo_test.js`,
-`e2e_v65_goyang_test.js`, `e2e_v65_sihwamtv_test.js`로 브라우저 UI까지 검증).
+시화MTV 푸르지오 디오션 오피스텔, 힐스테이트 둔산 오피스텔)도 `test_cases_d.js`~
+`test_cases_j.js`로 회귀 고정했다(`e2e_real_test.js`, `e2e_v65_test.js`,
+`e2e_v65_songdo_test.js`, `e2e_v65_goyang_test.js`, `e2e_v65_sihwamtv_test.js`,
+`e2e_pdf_upload_test.js`, `e2e_v65_hillstate_dunsan_test.js`로 브라우저 UI까지 검증).
 
 ### 여전히 남아있는 제한사항
 
