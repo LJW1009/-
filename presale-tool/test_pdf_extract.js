@@ -1,11 +1,13 @@
 /*
  * PDF 업로드 기능(텍스트 추출 → 섹션 자동 분리 → 파서) 통합 검증.
  * 브라우저의 handlePdfUpload()/extractPdfFullText()와 동일한 방식(아이템을 그대로 이어붙이고
- * hasEOL에서만 개행 삽입)으로 pdfjs-dist(Node)를 이용해 실제 분양광고 PDF 2건(fixtures/sihwa_mtv_officetel.pdf,
+ * hasEOL에서만 개행 삽입)으로 pdfjs-dist(Node)를 이용해 실제 분양광고 PDF 3건(fixtures/sihwa_mtv_officetel.pdf,
  * test_cases_i.js의 시화MTV 푸르지오 디오션 실사례와 동일 문서 / fixtures/hillstate_dunsan_officetel.pdf,
- * test_cases_j.js의 힐스테이트 둔산 오피스텔 실사례와 동일 문서)를 열어, splitDocumentSections로 자른
- * 결과가 parser.js로 정확히 파싱되는지 확인한다. app_v65_source.html에 삽입된 vendor/pdfjs.min.js와
- * 로직이 같음을 보장하기 위해 굳이 별도 추출 함수를 만들지 않고 이 파일 안에서 동일하게 재구현한다.
+ * test_cases_j.js의 힐스테이트 둔산 오피스텔 실사례와 동일 문서 / fixtures/songdo_g53_officetel.pdf,
+ * test_cases_k.js의 더샵 송도그란테르 G5-3블록 오피스텔 실사례와 동일 문서)를 열어,
+ * splitDocumentSections로 자른 결과가 parser.js로 정확히 파싱되는지 확인한다. app_v65_source.html에
+ * 삽입된 vendor/pdfjs.min.js와 로직이 같음을 보장하기 위해 굳이 별도 추출 함수를 만들지 않고 이
+ * 파일 안에서 동일하게 재구현한다.
  */
 const path = require('path');
 const fs = require('fs');
@@ -79,6 +81,24 @@ async function main() {
   check('P11', '84E1-T "11, 15층"(콤마+공백 분리 층 목록) 유실 없이 정확히 인식',
     !!r84e1t && r84e1t.floor.kind === 'list' && r84e1t.floor.floors.length === 2
       && r84e1t.floor.floors[0] === 11 && r84e1t.floor.floors[1] === 15 && r84e1t.price === 1008000000);
+
+  const pdfPath3 = path.join(__dirname, 'fixtures', 'songdo_g53_officetel.pdf');
+  const full3 = await extractFullText(pdfPath3);
+  check('P12', 'PDF 텍스트 추출(더샵 송도그란테르 G5-3블록 오피스텔): 최소 분량 이상 추출됨', full3.length > 10000);
+
+  const sections3 = parser.splitDocumentSections(full3);
+  check('P13', '공급대상 및 공급규모/공급금액 및 납부일정 섹션 앵커 발견(송도그란테르 G5-3)',
+    sections3.found.area && sections3.found.price);
+
+  const area3 = parser.parseAreaSection(sections3.area);
+  const codes3 = area3.map((x) => x.code);
+  check('P14', '공급면적 8개 타입 전부 인식(pdf.js 재배치로 표 본문이 공급금액 섹션 앞부분에 섞여 들어간 문서를, 단위표기(㎡/원) 2차 경계로 복구)',
+    area3.length === 8 && codes3.includes('84OA') && codes3.includes('84OH'));
+
+  const price3 = parser.parsePriceSection(sections3.price, codes3);
+  const r84oa = price3.priceRows.find((r) => r.code === '84OA' && r.floor.raw === '5층');
+  check('P15', '84OA 5층 분양가/계약금/잔금 정확히 인식(공급면적표 복구 후 남은 price 섹션이 온전함)',
+    !!r84oa && r84oa.price === 630000000 && r84oa.down_payment === 63000000 && r84oa.balance === 189000000);
 
   console.log(`[test_pdf_extract.js] ${pass}/${pass + fail} 통과`);
   if (failures.length) {

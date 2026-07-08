@@ -1100,9 +1100,33 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     area: [/[■▣]\s*공급대상\s*(?:및\s*공급규모)?(?!물)/],
     price: [/[■▣]\s*공급금액\s*및\s*납부일정/, /[■▣]\s*분양가격\s*납부조건\s*등?\s*안내/, /[■▣]\s*공급금액\s*납부조건\s*등?\s*안내/],
     balcony: [/[■▣]\s*발코니\s*확장/],
-    option: [/[■▣]\s*추가\s*선택\s*옵션품목/, /[■▣]\s*추가선택\s*옵션품목/, /[■▣]\s*옵션품목/, /[■▣]\s*추가\s*선택품목/]
+    option: [/[■▣]\s*추가\s*선택\s*옵션품목/, /[■▣]\s*추가선택\s*옵션품목/, /[■▣]\s*옵션품목/, /[■▣]\s*별도계약\s*[-–]\s*추가\s*선택품목/, /[■▣]\s*추가\s*선택품목/]
   };
   var NEXT_MAJOR_SECTION_RE = /청약신청\s*자격\s*및\s*공급일정/;
+
+  // pdf.js 텍스트 재구성 순서가 시각적 순서와 어긋나는 문서(예: 더샵 송도그란테르 G5-3블록)에서는,
+  // "▣ 공급대상" 제목 바로 뒤에 표 본문이 오지 않고 "▣ 공급금액 및 납부일정" 제목 뒤로 표 본문
+  // 전체가 밀려나 있는 경우가 있다. 이 경우 앵커 기반 1차 분리만으로는 area 섹션이 안내문 몇
+  // 줄만 남고 실제 표는 price 섹션 앞부분에 섞여 들어간다. 다행히 각 표 바로 앞에는 "(단위 :
+  // ㎡...)"(면적표)/"(단위 : 원...)"(가격표) 표기가 항상 붙어 있으므로, 이 둘을 2차 경계로 삼아
+  // 재분리할 수 있다. area 섹션이 실제로 비어 있을 때만(정상 케이스는 건드리지 않도록) 시도하고,
+  // 복구한 조각이 실제로 유효한 면적 행을 만들어낼 때만 채택한다(실패하면 조용히 포기 - 앞서
+  // "합쳐서 재시도" 폴백을 폐기한 것과 같은 원칙: 명시적 실패가 조용한 오염보다 안전하다).
+  var AREA_UNIT_MARKER_RE = /[(（]\s*단위[^)）]*㎡[^)）]*[)）]/;
+  var PRICE_UNIT_MARKER_RE = /[(（]\s*단위[^)）]*원[^)）]*[)）]/;
+
+  function repairMisplacedAreaTable(area, price) {
+    if (parseAreaSection(area).length > 0) return null;
+    var areaMarkerIdx = price.search(AREA_UNIT_MARKER_RE);
+    if (areaMarkerIdx < 0) return null;
+    var priceMarkerMatch = price.slice(areaMarkerIdx + 1).match(PRICE_UNIT_MARKER_RE);
+    if (!priceMarkerMatch) return null;
+    var priceMarkerIdx = areaMarkerIdx + 1 + priceMarkerMatch.index;
+    var recoveredArea = price.slice(areaMarkerIdx, priceMarkerIdx).trim();
+    var recoveredPrice = price.slice(priceMarkerIdx).trim();
+    if (!parseAreaSection(recoveredArea).length) return null;
+    return { area: (area + '\n' + recoveredArea).trim(), price: recoveredPrice };
+  }
 
   function findEarliestMatch(text, patterns, fromIndex) {
     var searchFrom = fromIndex || 0;
@@ -1143,6 +1167,11 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     var price = sliceSection(text, priceStart, [balconyStart, optionStart, nextMajorStart]);
     var balcony = sliceSection(text, balconyStart, [optionStart, nextMajorStart]);
     var option = sliceSection(text, optionStart, [nextMajorStart]);
+
+    if (areaStart >= 0 && priceStart >= 0) {
+      var repaired = repairMisplacedAreaTable(area, price);
+      if (repaired) { area = repaired.area; price = repaired.price; }
+    }
 
     return {
       area: area,

@@ -20,22 +20,22 @@
 | `adapter_v65.js` | `app_v65_source.html`이 기대하는 호출 규약(`parsePriceSection`이 code→rows 맵을 반환, `extractMeta`가 날짜를 문자열로 반환 등)으로 `parser.js`를 감싸는 얇은 어댑터 |
 | `build_v65.js` | **기본 빌드**: `app_v65_source.html`의 옛 파서 구간을 제거하고 `parser.js`+`adapter_v65.js`를 삽입해 `dist/분양가정리.html` 생성 |
 | `app.html` / `logic.js` / `build.js` | 레거시 UI 및 빌드 (참고용으로 유지) |
-| `test_cases.js`~`test_cases_j.js` | 파서 단위/통합/실사례/범용성 회귀 테스트 (총 111개) |
-| `run_tests.js`~`run_tests_j.js` | 테스트 실행기 |
+| `test_cases.js`~`test_cases_k.js` | 파서 단위/통합/실사례/범용성 회귀 테스트 (총 114개) |
+| `run_tests.js`~`run_tests_k.js` | 테스트 실행기 |
 | `test_excel.js` | 엑셀 빌더 검증 (Node `xlsx` 패키지 사용, 레거시 UI의 `excel.js` 대상) |
 | `test_pdf_extract.js` | PDF 첨부 자동인식 파이프라인(텍스트 추출→섹션 분리→파서) Node 통합 검증 |
 | `e2e_test.js`, `e2e_real_test.js` | 레거시 UI 브라우저(Playwright) 종단 테스트 |
 | `e2e_v65_test.js`, `e2e_v65_songdo_test.js`, `e2e_v65_goyang_test.js`, `e2e_v65_sihwamtv_test.js` | **기본 UI** 브라우저 종단 테스트 (실제 원문 4건으로 분석→추가→요약/수정/원본 탭→삭제→엑셀/JSON 다운로드까지 검증) |
-| `e2e_pdf_upload_test.js`, `e2e_v65_hillstate_dunsan_test.js` | **PDF 첨부** 브라우저 종단 테스트 (실제 파일 입력에 실사례 PDF를 첨부해 자동 인식→분석→추가까지 검증) |
+| `e2e_pdf_upload_test.js`, `e2e_v65_hillstate_dunsan_test.js`, `e2e_v65_songdo_pdf_test.js` | **PDF 첨부** 브라우저 종단 테스트 (실제 파일 입력에 실사례 PDF를 첨부해 자동 인식→분석→추가까지 검증) |
 | `vendor/xlsx.full.min.js` | SheetJS 번들 (오프라인 사용을 위해 체크인됨) |
 | `vendor/pdfjs.min.js`, `vendor/pdfjs.worker.min.js` | pdf.js(Mozilla) legacy 빌드 - PDF 텍스트 추출용, `app_v65_source.html`에 직접 인라인됨 |
-| `fixtures/*.pdf` | PDF 첨부 기능 테스트용 실사례 분양광고 PDF (시화MTV 푸르지오 디오션 오피스텔, 힐스테이트 둔산 오피스텔) |
+| `fixtures/*.pdf` | PDF 첨부 기능 테스트용 실사례 분양광고 PDF (시화MTV 푸르지오 디오션 오피스텔, 힐스테이트 둔산 오피스텔, 더샵 송도그란테르 G5-3블록 오피스텔) |
 
 ## 실행
 
 ```bash
 npm install              # xlsx/pdfjs-dist(테스트용), playwright(E2E용)
-npm test                 # 파서 111/111 + 엑셀 빌더 + PDF 추출 파이프라인 검증
+npm test                 # 파서 114/114 + 엑셀 빌더 + PDF 추출 파이프라인 검증
 npm run test:e2e         # 브라우저 종단 테스트 (기본 UI + 레거시 UI + PDF 첨부, 합성/실제 데이터)
 npm run build            # dist/분양가정리.html 생성 (기본 UI, app_v65_source.html 기반)
 npm run build:legacy     # 레거시 UI로 다시 빌드하고 싶을 때만 사용
@@ -98,15 +98,21 @@ npm run build:legacy     # 레거시 UI로 다시 빌드하고 싶을 때만 사
 - pdf.js의 텍스트 추출은 항상 시각적 순서와 100% 일치하지 않는다. 복잡한
   다단/중첩 표 레이아웃에서는 표 하나의 데이터가 물리적으로 다른 표의 헤더
   뒤로 재배치돼 나오는 경우가 실제로 관찰됐다(더샵 송도그란테르 G5-3 PDF에서,
-  공급면적표의 "(단위: 호실, ㎡)" 표기가 공급금액표 헤더 뒤에 나타나 두 표가
-  하나의 섹션으로 합쳐진 사례). 이 경우 `splitDocumentSections`가 두 섹션을
-  하나로 묶어버릴 수 있으므로, 자동 채움 후에는 항상 분석 칩(표기N/합산M)을
-  확인하고 필요하면 직접 수정해야 한다. **여러 실패 사례를 검증한 결과, 이런
-  경우 억지로 "실패하면 두 섹션을 합쳐서 재시도"하는 폴백은 추가하지 않기로
-  했다** — 합쳐서 재시도하면 일부 타입은 살아나지만 다른 타입(세대수 등)이
-  조용히 잘못된 값으로 채워지는 사례를 직접 확인했기 때문에(예: 마지막 타입의
-  세대수 4가 총계행의 24로 둔갑), 명시적 실패가 조용한 오염보다 안전하다는
-  이 프로젝트의 원칙에 따라 사용자에게 확인을 맡긴다.
+  "▣ 공급대상" 제목 바로 뒤에는 안내문만 남고 실제 표 본문 전체가 "▣ 공급금액
+  및 납부일정" 제목 뒤로 밀려나 두 표가 하나의 섹션으로 합쳐진 사례). 사용자가
+  실제로 이 문서를 첨부해 공급면적이 인식되지 않는 것을 확인해줘서, `(단위 :
+  ㎡...)`(면적표 고유 표기)와 `(단위 : 원...)`(가격표 고유 표기)가 항상 각자 표
+  바로 앞에 붙어 있다는 점을 2차 경계로 삼아 `splitDocumentSections`가 자동으로
+  재분리하도록 일반화했다(`repairMisplacedAreaTable`). **이전에 폐기했던 "실패하면
+  두 섹션을 합쳐서 통째로 재시도"하는 폴백과는 다른 메커니즘이다** — 그 폴백은
+  구분자 없이 area+price 전체를 한꺼번에 `parseAreaSection`에 밀어 넣어 무관한
+  숫자가 섞여 들어가는 조용한 오염을 일으켰지만, 이번 복구는 각 표 고유의 단위
+  표기로 경계를 정확히 잘라낸 뒤 그 결과가 실제로 유효한 면적 행을 만들어낼
+  때만(`parseAreaSection(...).length > 0`) 채택하고, 그렇지 않으면 조용히 포기해
+  기존 동작(안내문만 남은 area 섹션)으로 되돌아간다 — 명시적 실패가 조용한
+  오염보다 안전하다는 원칙은 그대로 유지된다. 이 복구로도 안 되는 재배치 패턴이
+  있을 수 있으므로, 자동 채움 후에는 항상 분석 칩(표기N/합산M)을 확인하고
+  필요하면 직접 수정해야 한다.
 - 한 PDF 파일에 서로 다른 두 개의 분양공고(예: 아파트+오피스텔)가 함께 들어있는
   경우, 섹션 앵커는 "문서 순서상 첫 번째로 나오는" 것을 채택한다. 두 번째
   공고를 채우려면 필요한 페이지만 별도 PDF로 잘라서 첨부하거나, 직접 붙여넣어야
@@ -175,6 +181,18 @@ npm run build:legacy     # 레거시 UI로 다시 빌드하고 싶을 때만 사
   토큰("11,")을 층 표기로 인정하지 않아, 뒤 토큰("15층")만 남고 앞부분이 통째로
   유실되는 문제가 있었다. 끝에 붙은 구분자로 끝나는 토큰을 층 목록의 계속되는 부분으로
   인식하도록 `isFloorToken`/`skipFloorPrefix`를 일반화했다.
+- **pdf.js 재배치로 공급면적표 본문 전체가 공급금액 섹션 앞부분에 섞여 들어가는 PDF**
+  (더샵 송도그란테르 G5-3블록 오피스텔 실제 PDF): 사용자가 "PDF 첨부로 공급면적을
+  인식 못한다"고 제보해 발견. `splitDocumentSections`가 "▣ 공급대상" 제목 기준
+  1차 분리만 하면 area 섹션에 안내문만 남았는데, 각 표 바로 앞에 항상 붙는
+  `(단위 : ㎡...)`/`(단위 : 원...)` 표기를 2차 경계로 삼아 재분리하는
+  `repairMisplacedAreaTable`을 추가해 해결했다(복구한 조각이 실제로 유효한 면적
+  행을 만들어낼 때만 채택 - "실패하면 두 섹션을 합쳐서 재시도"하는, 앞서 폐기했던
+  폴백과는 다른 안전한 메커니즘).
+- **옵션 섹션 제목에 접두어가 붙는 경우**("▣ 별도계약 - 추가 선택품목"): 기존 OPTION
+  앵커가 이 형식을 인식하지 못해, 문서 뒤쪽의 무관한 "▣ 추가 선택품목 납부계좌 및
+  납부방법"(계좌 안내일 뿐 옵션표가 아님) 제목을 대신 골라버리는 문제가 있었다.
+  해당 형식을 앵커 후보에 추가해 해결.
 
 `test_cases_g.js`(4건)와 `test_cases_h.js`(6건)는 지금까지 확인된 어떤 실제 사례에도
 없던(g) 또는 세 번째 실사례에서 발견된(h) 조합이다 — 특정 사례에 맞춘 패치가 아니라
@@ -183,9 +201,10 @@ npm run build:legacy     # 레거시 UI로 다시 빌드하고 싶을 때만 사
 롯데캐슬, 더폴 우정, 더샵 송도그란테르(아파트), 힐스테이트 안양 펠루스, 더폴
 울산신정, 더샵 송도그란테르 G5-3블록(오피스텔), 고양창릉 S-4블록(공공분양),
 시화MTV 푸르지오 디오션 오피스텔, 힐스테이트 둔산 오피스텔)도 `test_cases_d.js`~
-`test_cases_j.js`로 회귀 고정했다(`e2e_real_test.js`, `e2e_v65_test.js`,
+`test_cases_k.js`로 회귀 고정했다(`e2e_real_test.js`, `e2e_v65_test.js`,
 `e2e_v65_songdo_test.js`, `e2e_v65_goyang_test.js`, `e2e_v65_sihwamtv_test.js`,
-`e2e_pdf_upload_test.js`, `e2e_v65_hillstate_dunsan_test.js`로 브라우저 UI까지 검증).
+`e2e_pdf_upload_test.js`, `e2e_v65_hillstate_dunsan_test.js`, `e2e_v65_songdo_pdf_test.js`로
+브라우저 UI까지 검증).
 
 ### 여전히 남아있는 제한사항
 
