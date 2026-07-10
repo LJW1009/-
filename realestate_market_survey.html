@@ -2153,23 +2153,20 @@ function exportExcel(){
   // 엑셀/리브레오피스를 구동해 검증할 방법이 없어 원인을 100% 특정하지 못했으므로, 애초에 범위 배열
   // 평가에 의존하지 않는(각 셀을 스칼라로 IF 판정 후 단순 사칙연산만 하는) 아래 방식으로 통일해
   // 엑셀 버전/뷰어에 관계없이 항상 같은 결과가 나오도록 했다.
-  function _wf(colIdx, rowNums, isPercent, weightColIdx){
+  // 값 없음일 때 수식이 최종적으로 표시할 텍스트 — 정적 셀(D/G/A 등)과 동일하게 "시세없음"으로
+  // 통일한다. (표시색은 각 셀 스타일에서 검정으로 지정)
+  const NA_TEXT='시세없음';
+  function _wf(colIdx, rowNums, weightColIdx){
     colIdx = colIdx + 1; // COL_OFFSET=1
     weightColIdx = (weightColIdx==null?3:weightColIdx) + 1; // COL_OFFSET=1
     if(!rowNums || rowNums.length===0) return null;
     const col=_COLS[colIdx], wcol=_COLS[weightColIdx];
     const vCells=rowNums.map(n=>'$'+col+'$'+n);
     const wCells=rowNums.map(n=>'$'+wcol+'$'+n);
-    if(isPercent){
-      // 퍼센트 컬럼(임대수익률)의 leaf 셀은 값이 없으면 실제로 빈 문자열이므로 <>"" 판정으로 충분
-      const num=vCells.map((v,i)=>'IF('+v+'<>"",VALUE(SUBSTITUTE('+v+',"%",""))*'+wCells[i]+',0)').join('+');
-      const den=vCells.map((v,i)=>'IF('+v+'<>"",'+wCells[i]+',0)').join('+');
-      return 'IFERROR(TEXT(('+num+')/('+den+'),"0.0")&"%","")';
-    }
     // 값 없음은 "시세없음" 텍스트이므로 ISNUMBER로 판정 (텍스트*숫자 곱셈이 되지 않도록 IF가 먼저 걸러냄)
     const num=vCells.map((v,i)=>'IF(ISNUMBER('+v+'),'+v+'*'+wCells[i]+',0)').join('+');
     const den=vCells.map((v,i)=>'IF(ISNUMBER('+v+'),'+wCells[i]+',0)').join('+');
-    return 'IFERROR(('+num+')/('+den+'),"")';
+    return 'IFERROR(('+num+')/('+den+'),"'+NA_TEXT+'")';
   }
   // 환산보증금 기준(500/1000/2000/3000) 최빈값 — 프로그램(modeStdDep)과 동일하게 평균이 아닌 최빈값 채택.
   // MODE.SNGL은 텍스트("시세없음")·빈 셀을 자동으로 무시하므로 별도 ISNUMBER 처리가 필요 없음.
@@ -2178,7 +2175,10 @@ function exportExcel(){
     if(!rowNums || rowNums.length===0) return null;
     const col=_COLS[colIdx];
     const cells=rowNums.map(n=>'$'+col+'$'+n).join(',');
-    return 'IFERROR(MODE.SNGL('+cells+'),"")';
+    // MODE.SNGL은 2010년 이후 추가된 함수라 OOXML에 그냥 쓰면 엑셀이 인식 못 해 #NAME? 에러가
+    // 남 (표시는 그대로 "MODE.SNGL"로 보이지만 내부 저장은 _xlfn. 접두사 필요) — 이 때문에
+    // ISNUMBER(stdDep셀)이 FALSE가 되어 뒤이은 임대수익률(대출X/50%) 전체가 빈칸으로 나왔었음.
+    return 'IFERROR(_xlfn.MODE.SNGL('+cells+'),"'+NA_TEXT+'")';
   }
   // 임대수익률(대출X/50%) 그룹·전체 평균: 개별 수익률(%)의 가중평균이 아니라, 이 행 자체의
   // 환산보증금(L열)·환산월세(M열)·매매가(숨김 P열, 이 행에서 이미 가중평균으로 계산됨)를
@@ -2192,10 +2192,10 @@ function exportExcel(){
     const hasNums='AND(ISNUMBER('+P+'),ISNUMBER('+L+'),ISNUMBER('+M+'))';
     const netPos='('+P+'-'+L+')>0';
     const y1Expr='('+M+'*12)/('+P+'-'+L+')*100';
-    const y1='IFERROR(IF(AND('+hasNums+','+netPos+'),TEXT('+y1Expr+',"0.0")&"%",""),"")';
+    const y1='IFERROR(IF(AND('+hasNums+','+netPos+'),TEXT('+y1Expr+',"0.0")&"%","'+NA_TEXT+'"),"'+NA_TEXT+'")';
     const eqPos='(('+P+'*0.5)-'+L+')>0';
     const y2Expr='('+M+'*12-'+P+'*0.5*0.045)/(('+P+'*0.5)-'+L+')*100';
-    const y2='IFERROR(IF(AND('+hasNums+','+netPos+','+eqPos+'),TEXT('+y2Expr+',"0.0")&"%",""),"")';
+    const y2='IFERROR(IF(AND('+hasNums+','+netPos+','+eqPos+'),TEXT('+y2Expr+',"0.0")&"%","'+NA_TEXT+'"),"'+NA_TEXT+'")';
     return{y1,y2};
   }
 
@@ -2211,30 +2211,33 @@ function exportExcel(){
   // 데이터(흰색,테두리)
   function D(v){
     const isN=typeof v==='number';
-    // null/빈값은 "시세없음" 텍스트를 실제 셀값으로 넣어 항상 확실히 표시되게 함.
+    // null/빈값은 "시세없음" 텍스트를 실제 셀값으로 넣어 항상 확실히 표시되게 함(검정, 굵게).
     // 그룹/전체평균 수식(_wf)은 <>"" 대신 ISNUMBER()로 판정하므로, 이 텍스트가 섞여 있어도
     // 정상적으로 "값 없음"으로 인식되어 평균 계산에서 안전하게 제외된다.
-    if(v==null||v==='')return{v:'시세없음',t:'s',s:{font:{...FONT,bold:true,color:{rgb:'999999'}},fill:WHITE,alignment:{horizontal:'center',vertical:'center'},border:ALLB}};
+    if(v==null||v==='')return{v:NA_TEXT,t:'s',s:{font:{...FONT,bold:true,color:{rgb:'000000'}},fill:WHITE,alignment:{horizontal:'center',vertical:'center'},border:ALLB}};
     return{v,t:isN?'n':'s',s:{font:FONT,fill:WHITE,numFmt:isN?'#,##0':'',alignment:{horizontal:'center',vertical:'center'},border:ALLB}};
   }
-  // 평균(파랑,굵게,테두리) - 정적값 (평형용)
-  function A(v,aFill){const isN=typeof v==='number';const fill=aFill||BLUE;return{v:v==null?'':v,t:isN?'n':'s',s:{font:{...FONT,bold:true},fill,numFmt:isN?'#,##0':'',alignment:{horizontal:'center',vertical:'center'},border:ALLB}};}
+  // 임대수익률 값(%) 또는 없으면 "시세없음"(검정) — 타입별(leaf) 수익률 셀 전용
+  function YP(pct){return{v:pct!=null?pct.toFixed(1)+'%':NA_TEXT,t:'s',s:{font:{...FONT,color:{rgb:'000000'}},fill:WHITE,alignment:{horizontal:'center'},border:ALLB}};}
+  // 평균(파랑,굵게,테두리) - 정적값 (평형용). 값 없으면 D()와 동일하게 "시세없음"(검정) 표시.
+  function A(v,aFill){const isN=typeof v==='number';const fill=aFill||BLUE;return{v:(v==null||v==='')?NA_TEXT:v,t:isN?'n':'s',s:{font:{...FONT,bold:true,color:{rgb:'000000'}},fill,numFmt:isN?'#,##0':'',alignment:{horizontal:'center',vertical:'center'},border:ALLB}};}
   // 매물건수(흰색,테두리)
   function M(v){const isN=typeof v==='number';return{v:v==null?'':v,t:isN?'n':'s',s:{font:FONT,fill:WHITE,numFmt:isN?'#,##0':'',alignment:{horizontal:'center',vertical:'center'},border:ALLB}};}
   // 단지정보
   function INFO(v,al){return{v:v==null?'':v,t:'s',s:{font:FONT,alignment:{horizontal:al||'left',vertical:'center'}}};}
-  // 그룹 평균행 - 정적값 (평형용)
-  function G(v,gFill){const isN=typeof v==='number';const fill=gFill||GREEN;return{v:v==null?'':v,t:isN?'n':'s',s:{font:{...FONT,bold:true,color:{rgb:'000000'}},fill,numFmt:isN?'#,##0':'',alignment:{horizontal:'center',vertical:'center'},border:ALLB}};}
+  // 그룹 평균행 - 정적값 (평형용). 값 없으면 "시세없음"(검정) 표시.
+  function G(v,gFill){const isN=typeof v==='number';const fill=gFill||GREEN;return{v:(v==null||v==='')?NA_TEXT:v,t:isN?'n':'s',s:{font:{...FONT,bold:true,color:{rgb:'000000'}},fill,numFmt:isN?'#,##0':'',alignment:{horizontal:'center',vertical:'center'},border:ALLB}};}
   // 평형 전용 빌더 (소수2자리+"평", 정적값 - 그대로 유지)
-  function GP(v,gFill){const fill=gFill||GREEN;return{v:v==null?'':v,t:typeof v==='number'?'n':'s',s:{font:{...FONT,bold:true,color:{rgb:'000000'}},fill,numFmt:'0.00"평"',alignment:{horizontal:'center',vertical:'center'},border:ALLB}};}
-  function AP(v,aFill){const fill=aFill||BLUE;return{v:v==null?'':v,t:typeof v==='number'?'n':'s',s:{font:{...FONT,bold:true},fill,numFmt:'0.00"평"',alignment:{horizontal:'center',vertical:'center'},border:ALLB}};}
+  function GP(v,gFill){const fill=gFill||GREEN;return{v:(v==null||v==='')?NA_TEXT:v,t:typeof v==='number'?'n':'s',s:{font:{...FONT,bold:true,color:{rgb:'000000'}},fill,numFmt:typeof v==='number'?'0.00"평"':'',alignment:{horizontal:'center',vertical:'center'},border:ALLB}};}
+  function AP(v,aFill){const fill=aFill||BLUE;return{v:(v==null||v==='')?NA_TEXT:v,t:typeof v==='number'?'n':'s',s:{font:{...FONT,bold:true,color:{rgb:'000000'}},fill,numFmt:typeof v==='number'?'0.00"평"':'',alignment:{horizontal:'center',vertical:'center'},border:ALLB}};}
   // 병합 종속 셀
   function HB(){return{v:'',t:'s',s:{font:FONT,fill:GRAY,alignment:{horizontal:'center'},border:ALLB}};}
-  // 수식 셀 빌더: 파랑 평균행 (f=수식, v=표시값) - fill 커스텀 지원
-  function AF(f,v,aFill){const isN=typeof v==='number';const fill=aFill||BLUE;return{f,v:v==null?'':v,t:isN?'n':'s',s:{font:{...FONT,bold:true},fill,numFmt:isN?'#,##0':'',alignment:{horizontal:'center',vertical:'center'},border:ALLB}};}
-  function AFS(f,v,aFill){const fill=aFill||BLUE;return{f,v:v==null?'':v,t:'s',s:{font:{...FONT,bold:true},fill,alignment:{horizontal:'center',vertical:'center'},border:ALLB}};}
-  // 수식 셀 빌더: 녹색 그룹평균행 (f=수식, v=표시값) - fill 커스텀 지원
-  function GF(f,v,gFill){const isN=typeof v==='number';const fill=gFill||GREEN;return{f,v:v==null?'':v,t:isN?'n':'s',s:{font:{...FONT,bold:true,color:{rgb:'000000'}},fill,numFmt:isN?'#,##0':'',alignment:{horizontal:'center',vertical:'center'},border:ALLB}};}
+  // 수식 셀 빌더: 파랑 평균행 (f=수식, v=표시값) - fill 커스텀 지원. 값 없으면 "시세없음"(검정) 표시
+  // — 수식 쪽(_wf/_modeF/_yieldF)도 값 없을 때 같은 텍스트를 반환하도록 맞춰둠.
+  function AF(f,v,aFill){const isN=typeof v==='number';const fill=aFill||BLUE;return{f,v:(v==null||v==='')?NA_TEXT:v,t:isN?'n':'s',s:{font:{...FONT,bold:true,color:{rgb:'000000'}},fill,numFmt:isN?'#,##0':'',alignment:{horizontal:'center',vertical:'center'},border:ALLB}};}
+  function AFS(f,v,aFill){const fill=aFill||BLUE;return{f,v:(v==null||v==='')?NA_TEXT:v,t:'s',s:{font:{...FONT,bold:true,color:{rgb:'000000'}},fill,alignment:{horizontal:'center',vertical:'center'},border:ALLB}};}
+  // 수식 셀 빌더: 녹색 그룹평균행 (f=수식, v=표시값) - fill 커스텀 지원. 값 없으면 "시세없음"(검정) 표시
+  function GF(f,v,gFill){const isN=typeof v==='number';const fill=gFill||GREEN;return{f,v:(v==null||v==='')?NA_TEXT:v,t:isN?'n':'s',s:{font:{...FONT,bold:true,color:{rgb:'000000'}},fill,numFmt:isN?'#,##0':'',alignment:{horizontal:'center',vertical:'center'},border:ALLB}};}
 
   Object.entries(groups).forEach(([sheetName,cxList])=>{
     const wsData=[];
@@ -2327,7 +2330,6 @@ function exportExcel(){
       r3[0]={v:'주차대수 총 '+(cx.parking||'-')+'대('+unitPer+' '+(cx.parkingRatio||'-')+'대)',s:{font:FONT,fill:WHITE,alignment:{horizontal:'left',vertical:'center'}}};
       pushRow(r3);
       addMerge(R-1,0,R-1,3);
-      const hdr1StartR=R;
       if(hasRent){
         const h1=[H('구분(평형)'),HB(),HB(),H(unitWord+'수'),H('실거래가'),HB(),H('당월(평당)'),HB(),H('전세'),HB(),H('월세'),HB(),H('임대수익률'),HB(),HB()];
         pushRow(h1);
@@ -2363,8 +2365,7 @@ function exportExcel(){
               D(r.askAvg&&r.pyBase?Math.round(r.askAvg/r.pyBase):null),D(r.kb?.avg&&r.pyBase?Math.round(r.kb.avg/r.pyBase):null),
               D(r.yd.jsAvg?Math.round(r.yd.jsAvg):null),D(r.yd.jsAvg&&r.pyBase?Math.round(r.yd.jsAvg/r.pyBase):null),
               D(wr?wr.stdDep:null),D(wr?Math.round(wr.convRentAvg):null),
-              {v:y?.y1!=null?y.y1.toFixed(1)+'%':'',t:'s',s:{font:FONT,fill:WHITE,alignment:{horizontal:'center'},border:ALLB}},
-              {v:y?.y2!=null?y.y2.toFixed(1)+'%':'',t:'s',s:{font:FONT,fill:WHITE,alignment:{horizontal:'center'},border:ALLB}},
+              YP(y?.y1), YP(y?.y2),
               D(r.yd.salePrice?Math.round(r.yd.salePrice):null)
             ]);
           } else {
@@ -2382,10 +2383,10 @@ function exportExcel(){
           const gLabel=(g.groupLabel||'그룹')+' 평균';
           const rowNums=[]; for(let rr=grng.s; rr<=grng.e; rr++) rowNums.push(rr);
           // ★ 그룹평균 행: 평형(전용/공급/계약)은 그대로 정적값, 나머지는 수식으로 그룹 내 타입행을 가중평균
-          const fTrAvg=_wf(4,rowNums,false), fTrPy=_wf(5,rowNums,false), fAskPy=_wf(6,rowNums,false), fKbPy=_wf(7,rowNums,false);
+          const fTrAvg=_wf(4,rowNums), fTrPy=_wf(5,rowNums), fAskPy=_wf(6,rowNums), fKbPy=_wf(7,rowNums);
           if(hasRent){
-            const fJsAvg=_wf(8,rowNums,false), fJsPy=_wf(9,rowNums,false), fStdDep=_modeF(10,rowNums), fConvRent=_wf(11,rowNums,false);
-            const fSaleP=_wf(14,rowNums,false);
+            const fJsAvg=_wf(8,rowNums), fJsPy=_wf(9,rowNums), fStdDep=_modeF(10,rowNums), fConvRent=_wf(11,rowNums);
+            const fSaleP=_wf(14,rowNums);
             const thisRowNum=R+1+ROW_OFFSET; // 이 그룹평균 행 자신의 1-based 엑셀 행 번호 (수익률 수식이 자기 행의 L/M/P열을 참조)
             const {y1:fY1,y2:fY2}=_yieldF(thisRowNum);
             pushRow([
@@ -2421,11 +2422,10 @@ function exportExcel(){
       });
       const dataEndR=R-1;
       // ── 전체 평균 행 (파랑, 수식 내장) ──────────────────────────────
-      const avgRowNum=R+1;
-      const fTrAvg=_wf(4,allTypeRowNums,false);
-      const fTrPy=_wf(5,allTypeRowNums,false);
-      const fAskPy=_wf(6,allTypeRowNums,false);
-      const fKbPy=_wf(7,allTypeRowNums,false);
+      const fTrAvg=_wf(4,allTypeRowNums);
+      const fTrPy=_wf(5,allTypeRowNums);
+      const fAskPy=_wf(6,allTypeRowNums);
+      const fKbPy=_wf(7,allTypeRowNums);
       if(hasRent){
         const wJsAvg=wtdPrice(TR,r=>r.yd.jsAvg||0);
         const wJsPy=wtdPyPrice(TR,r=>r.yd.jsAvg||0);
@@ -2434,11 +2434,11 @@ function exportExcel(){
         const wSaleP=wtdPrice(TR,r=>r.yd.salePrice||0);
         const wY1=wSaleP&&wConvRent&&wStdDep?(wConvRent*12)/(wSaleP-wStdDep)*100:null;
         const wY2=wSaleP&&wConvRent&&wStdDep?(()=>{const la=wSaleP*0.5;const eq=wSaleP-la-wStdDep;return eq>0?(wConvRent*12-la*0.045)/eq*100:null;})():null;
-        const fJsAvg=_wf(8,allTypeRowNums,false);
-        const fJsPy=_wf(9,allTypeRowNums,false);
+        const fJsAvg=_wf(8,allTypeRowNums);
+        const fJsPy=_wf(9,allTypeRowNums);
         const fStdDep=_modeF(10,allTypeRowNums);
-        const fConvRent=_wf(11,allTypeRowNums,false);
-        const fSaleP=_wf(14,allTypeRowNums,false);
+        const fConvRent=_wf(11,allTypeRowNums);
+        const fSaleP=_wf(14,allTypeRowNums);
         const thisRowNum=R+1+ROW_OFFSET; // 이 전체평균 행 자신의 1-based 엑셀 행 번호
         const {y1:fY1,y2:fY2}=_yieldF(thisRowNum);
         pushRow([
