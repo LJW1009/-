@@ -2153,10 +2153,11 @@ function exportExcel(){
       if(isPercent){
         return 'IFERROR(TEXT(SUMPRODUCT(IF('+rng+'<>"",VALUE(SUBSTITUTE('+rng+',"%","")),0),'+wrng+')/SUMPRODUCT('+wrng+',--('+rng+'<>"")),"0.0")&"%","")';
       }
-      // IF()로 빈 셀(시세없음 텍스트)을 0으로 치환 후 곱해야 함 — SUMPRODUCT에 텍스트가 섞인 범위를 그대로 곱하면
-      // 배열 전체가 #VALUE! 에러가 되어(IFERROR가 잡아 빈칸 처리) 그룹 내 한 타입이라도 시세없음이면
-      // 평균 전체가 사라지는 문제가 있었음 (percent·비연속 분기는 이미 이렇게 처리되어 있었음)
-      return 'IFERROR(SUMPRODUCT(IF('+rng+'<>"",'+rng+',0),'+wrng+')/SUMPRODUCT('+wrng+',--('+rng+'<>"")),"")';
+      // ISNUMBER()로 "시세없음" 같은 텍스트 셀을 걸러낸 뒤 0으로 치환하고 곱해야 함 — 그냥 SUMPRODUCT에
+      // 텍스트가 섞인 범위를 곱하면 배열 전체가 #VALUE! 에러가 되어(IFERROR가 잡아 빈칸 처리) 그룹 내
+      // 한 타입이라도 시세없음이면 평균 전체가 사라지는 문제가 있었음. <>"" 비교는 "시세없음" 텍스트가
+      // 빈 문자열이 아니라서 걸러지지 않으므로 반드시 ISNUMBER로 판정해야 함
+      return 'IFERROR(SUMPRODUCT(IF(ISNUMBER('+rng+'),'+rng+',0),'+wrng+')/SUMPRODUCT('+wrng+',--ISNUMBER('+rng+')),"")';
     } else {
       // 비연속 행 참조 (그룹평균/단독타입 행이 섞여 있는 경우)
       const vCells=rowNums.map(n=>'$'+col+'$'+n);
@@ -2166,8 +2167,10 @@ function exportExcel(){
         const den=vCells.map((v,i)=>'IF('+v+'<>"",'+wCells[i]+',0)').join('+');
         return 'IFERROR(TEXT(('+num+')/('+den+'),"0.0")&"%","")';
       }
-      const num=vCells.map((v,i)=>'IF('+v+'<>"",'+v+'*'+wCells[i]+',0)').join('+');
-      const den=vCells.map((v,i)=>'IF('+v+'<>"",'+wCells[i]+',0)').join('+');
+      // 여기도 <>""만으로는 "시세없음" 텍스트 셀을 걸러내지 못해 v*w에서 텍스트*숫자 곱셈 자체가
+      // #VALUE! 에러를 내고 IFERROR가 그룹 전체를 빈칸으로 만드는 문제가 있었음 — ISNUMBER로 판정
+      const num=vCells.map((v,i)=>'IF(ISNUMBER('+v+'),'+v+'*'+wCells[i]+',0)').join('+');
+      const den=vCells.map((v,i)=>'IF(ISNUMBER('+v+'),'+wCells[i]+',0)').join('+');
       return 'IFERROR(('+num+')/('+den+'),"")';
     }
   }
@@ -2184,10 +2187,10 @@ function exportExcel(){
   // 데이터(흰색,테두리)
   function D(v){
     const isN=typeof v==='number';
-    // null/빈값: 셀 실제값은 반드시 ''로 유지(수식의 <>"" 조건이 정상 작동하려면 필수) — 표시만 numFmt로 '시세없음' 치환
-    // (과거엔 v 자체를 '시세없음' 문자열로 덮어써서, 그룹/전체평균 SUMPRODUCT 수식이 그 텍스트를 만나
-    //  #VALUE! 에러를 내거나 <>"" 조건에서 빈 셀로 인식하지 못해 평균이 깨지는 원인이었음)
-    if(v==null||v==='')return{v:'',t:'s',s:{font:{...FONT,bold:true,color:{rgb:'999999'}},fill:WHITE,numFmt:';;;"시세없음"',alignment:{horizontal:'center',vertical:'center'},border:ALLB}};
+    // null/빈값은 "시세없음" 텍스트를 실제 셀값으로 넣어 항상 확실히 표시되게 함.
+    // 그룹/전체평균 수식(_wf)은 <>"" 대신 ISNUMBER()로 판정하므로, 이 텍스트가 섞여 있어도
+    // 정상적으로 "값 없음"으로 인식되어 평균 계산에서 안전하게 제외된다.
+    if(v==null||v==='')return{v:'시세없음',t:'s',s:{font:{...FONT,bold:true,color:{rgb:'999999'}},fill:WHITE,alignment:{horizontal:'center',vertical:'center'},border:ALLB}};
     return{v,t:isN?'n':'s',s:{font:FONT,fill:WHITE,numFmt:isN?'#,##0':'',alignment:{horizontal:'center',vertical:'center'},border:ALLB}};
   }
   // 평균(파랑,굵게,테두리) - 정적값 (평형용)
