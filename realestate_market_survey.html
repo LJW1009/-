@@ -2132,48 +2132,6 @@ function exportExcel(){
   const FONT={name:'나눔바른고딕',sz:9};
   const B1={style:'thin',color:{rgb:'000000'}};
   const ALLB={top:B1,bottom:B1,left:B1,right:B1};
-  // 열문자 변환
-  const _COLS=['A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T'];
-
-  // ── 가중평균 수식 빌더 (핵심 변경사항)
-  // rowNums: 참조할 데이터행의 1-based 행번호 배열 (연속/비연속 모두 처리)
-  // colIdx: 값이 있는 열 인덱스, weightColIdx: 세대수/호실수 열(기본 3=D열)
-  // isPercent: 값이 "12.3%" 형태의 텍스트인 컬럼인지 여부
-  function _wf(colIdx, rowNums, isPercent, weightColIdx){
-    colIdx = colIdx + 1; // COL_OFFSET=1
-    weightColIdx = (weightColIdx==null?3:weightColIdx) + 1; // COL_OFFSET=1
-    if(!rowNums || rowNums.length===0) return null;
-    const col=_COLS[colIdx], wcol=_COLS[weightColIdx];
-    let contiguous=true;
-    for(let i=1;i<rowNums.length;i++){ if(rowNums[i]!==rowNums[i-1]+1){contiguous=false;break;} }
-    if(contiguous){
-      const s=rowNums[0], e=rowNums[rowNums.length-1];
-      const rng='$'+col+'$'+s+':$'+col+'$'+e;
-      const wrng='$'+wcol+'$'+s+':$'+wcol+'$'+e;
-      if(isPercent){
-        return 'IFERROR(TEXT(SUMPRODUCT(IF('+rng+'<>"",VALUE(SUBSTITUTE('+rng+',"%","")),0),'+wrng+')/SUMPRODUCT('+wrng+',--('+rng+'<>"")),"0.0")&"%","")';
-      }
-      // ISNUMBER()로 "시세없음" 같은 텍스트 셀을 걸러낸 뒤 0으로 치환하고 곱해야 함 — 그냥 SUMPRODUCT에
-      // 텍스트가 섞인 범위를 곱하면 배열 전체가 #VALUE! 에러가 되어(IFERROR가 잡아 빈칸 처리) 그룹 내
-      // 한 타입이라도 시세없음이면 평균 전체가 사라지는 문제가 있었음. <>"" 비교는 "시세없음" 텍스트가
-      // 빈 문자열이 아니라서 걸러지지 않으므로 반드시 ISNUMBER로 판정해야 함
-      return 'IFERROR(SUMPRODUCT(IF(ISNUMBER('+rng+'),'+rng+',0),'+wrng+')/SUMPRODUCT('+wrng+',--ISNUMBER('+rng+')),"")';
-    } else {
-      // 비연속 행 참조 (그룹평균/단독타입 행이 섞여 있는 경우)
-      const vCells=rowNums.map(n=>'$'+col+'$'+n);
-      const wCells=rowNums.map(n=>'$'+wcol+'$'+n);
-      if(isPercent){
-        const num=vCells.map((v,i)=>'IF('+v+'<>"",VALUE(SUBSTITUTE('+v+',"%",""))*'+wCells[i]+',0)').join('+');
-        const den=vCells.map((v,i)=>'IF('+v+'<>"",'+wCells[i]+',0)').join('+');
-        return 'IFERROR(TEXT(('+num+')/('+den+'),"0.0")&"%","")';
-      }
-      // 여기도 <>""만으로는 "시세없음" 텍스트 셀을 걸러내지 못해 v*w에서 텍스트*숫자 곱셈 자체가
-      // #VALUE! 에러를 내고 IFERROR가 그룹 전체를 빈칸으로 만드는 문제가 있었음 — ISNUMBER로 판정
-      const num=vCells.map((v,i)=>'IF(ISNUMBER('+v+'),'+v+'*'+wCells[i]+',0)').join('+');
-      const den=vCells.map((v,i)=>'IF(ISNUMBER('+v+'),'+wCells[i]+',0)').join('+');
-      return 'IFERROR(('+num+')/('+den+'),"")';
-    }
-  }
 
   const GRAY={patternType:'solid',fgColor:{rgb:'D9D9D9'}};   // 헤더/실거래 라벨·월 회색
   const BLUE={patternType:'solid',fgColor:{rgb:'00B0F0'}};   // 아파트 평균행 밝은 파랑
@@ -2187,9 +2145,8 @@ function exportExcel(){
   // 데이터(흰색,테두리)
   function D(v){
     const isN=typeof v==='number';
-    // null/빈값은 "시세없음" 텍스트를 실제 셀값으로 넣어 항상 확실히 표시되게 함.
-    // 그룹/전체평균 수식(_wf)은 <>"" 대신 ISNUMBER()로 판정하므로, 이 텍스트가 섞여 있어도
-    // 정상적으로 "값 없음"으로 인식되어 평균 계산에서 안전하게 제외된다.
+    // null/빈값은 "시세없음" 텍스트를 실제 셀값으로 표시. 그룹/전체평균은 더 이상 이 셀을 엑셀
+    // 수식으로 참조하지 않고(앱이 계산한 정적값을 바로 기입) 표시 전용이라 값이 무엇이든 안전함.
     if(v==null||v==='')return{v:'시세없음',t:'s',s:{font:{...FONT,bold:true,color:{rgb:'999999'}},fill:WHITE,alignment:{horizontal:'center',vertical:'center'},border:ALLB}};
     return{v,t:isN?'n':'s',s:{font:FONT,fill:WHITE,numFmt:isN?'#,##0':'',alignment:{horizontal:'center',vertical:'center'},border:ALLB}};
   }
@@ -2206,11 +2163,6 @@ function exportExcel(){
   function AP(v,aFill){const fill=aFill||BLUE;return{v:v==null?'':v,t:typeof v==='number'?'n':'s',s:{font:{...FONT,bold:true},fill,numFmt:'0.00"평"',alignment:{horizontal:'center',vertical:'center'},border:ALLB}};}
   // 병합 종속 셀
   function HB(){return{v:'',t:'s',s:{font:FONT,fill:GRAY,alignment:{horizontal:'center'},border:ALLB}};}
-  // 수식 셀 빌더: 파랑 평균행 (f=수식, v=표시값) - fill 커스텀 지원
-  function AF(f,v,aFill){const isN=typeof v==='number';const fill=aFill||BLUE;return{f,v:v==null?'':v,t:isN?'n':'s',s:{font:{...FONT,bold:true},fill,numFmt:isN?'#,##0':'',alignment:{horizontal:'center',vertical:'center'},border:ALLB}};}
-  function AFS(f,v,aFill){const fill=aFill||BLUE;return{f,v:v==null?'':v,t:'s',s:{font:{...FONT,bold:true},fill,alignment:{horizontal:'center',vertical:'center'},border:ALLB}};}
-  // 수식 셀 빌더: 녹색 그룹평균행 (f=수식, v=표시값) - fill 커스텀 지원
-  function GF(f,v,gFill){const isN=typeof v==='number';const fill=gFill||GREEN;return{f,v:v==null?'':v,t:isN?'n':'s',s:{font:{...FONT,bold:true,color:{rgb:'000000'}},fill,numFmt:isN?'#,##0':'',alignment:{horizontal:'center',vertical:'center'},border:ALLB}};}
 
   Object.entries(groups).forEach(([sheetName,cxList])=>{
     const wsData=[];
@@ -2318,10 +2270,7 @@ function exportExcel(){
       }
       const dataStartR=R;
       const exGroups=calcTypeGroups(TR,oft);
-      const groupRanges=[];
-      const childRowNums=[]; // ★ 그랜드토탈이 참조할 행: 단독타입은 자기 행, 그룹은 그룹평균 행
       exGroups.forEach(g=>{
-        const gStartR=R;
         g.types.forEach(r=>{
           const wr=r.yd.wolseResult;const y=wr?.yld;
           if(hasRent){
@@ -2342,32 +2291,28 @@ function exportExcel(){
             ]);
           }
         });
-        const gEndR=R-1;
-        const grng={s:gStartR+1+ROW_OFFSET, e:gEndR+1+ROW_OFFSET};
         if(!g.single){
           const ga=calcGroupAvg(g.types,oft);
           const gLabel=(g.groupLabel||'그룹')+' 평균';
-          const rowNums=[]; for(let rr=grng.s; rr<=grng.e; rr++) rowNums.push(rr);
-          // ★ 그룹평균 행: 평형(전용/공급/계약)은 그대로 정적값, 나머지는 수식으로 그룹 내 타입행을 가중평균
-          const fTrAvg=_wf(4,rowNums,false), fTrPy=_wf(5,rowNums,false), fAskPy=_wf(6,rowNums,false), fKbPy=_wf(7,rowNums,false);
+          // ★ 그룹평균 행: 엑셀 수식(SUMPRODUCT 등) 대신 앱이 이미 계산한 값을 그대로 정적으로 기입.
+          // Excel/기타 뷰어가 배열수식을 다르게(혹은 아예 재계산 없이) 처리하며 값이 안 보이는 사고가
+          // 반복되어, "화면에 보이는 값 = 엑셀 셀 값"을 100% 보장하는 정적값 방식으로 변경함.
           if(hasRent){
-            const fJsAvg=_wf(8,rowNums,false), fJsPy=_wf(9,rowNums,false), fStdDep=_wf(10,rowNums,false), fConvRent=_wf(11,rowNums,false);
-            const fY1=_wf(12,rowNums,true), fY2=_wf(13,rowNums,true);
             pushRow([
               G(gLabel,gFill),
               GP(ga.avgExcl!=null?ga.avgExcl:null,gFill),
               GP(ga.avgDisp!=null?ga.avgDisp:null,gFill),
               G(ga.totU||null,gFill),
-              GF(fTrAvg,ga.trAvg||null,gFill),
-              GF(fTrPy,ga.trPy||null,gFill),
-              GF(fAskPy,ga.askPy||null,gFill),
-              GF(fKbPy,ga.kbPy||null,gFill),
-              GF(fJsAvg,ga.jsAvg||null,gFill),
-              GF(fJsPy,ga.jsPy||null,gFill),
-              GF(fStdDep,ga.stdDep||null,gFill),
-              GF(fConvRent,ga.convRent||null,gFill),
-              GF(fY1,ga.gaY1!=null?ga.gaY1.toFixed(1)+'%':'',gFill),
-              GF(fY2,ga.gaY2!=null?ga.gaY2.toFixed(1)+'%':'',gFill)
+              G(ga.trAvg||null,gFill),
+              G(ga.trPy||null,gFill),
+              G(ga.askPy||null,gFill),
+              G(ga.kbPy||null,gFill),
+              G(ga.jsAvg||null,gFill),
+              G(ga.jsPy||null,gFill),
+              G(ga.stdDep||null,gFill),
+              G(ga.convRent||null,gFill),
+              {v:ga.gaY1!=null?ga.gaY1.toFixed(1)+'%':'',t:'s',s:{font:{...FONT,bold:true,color:{rgb:'000000'}},fill:gFill,alignment:{horizontal:'center',vertical:'center'},border:ALLB}},
+              {v:ga.gaY2!=null?ga.gaY2.toFixed(1)+'%':'',t:'s',s:{font:{...FONT,bold:true,color:{rgb:'000000'}},fill:gFill,alignment:{horizontal:'center',vertical:'center'},border:ALLB}}
             ]);
           } else {
             pushRow([
@@ -2375,25 +2320,17 @@ function exportExcel(){
               GP(ga.avgExcl!=null?ga.avgExcl:null,gFill),
               GP(ga.avgDisp!=null?ga.avgDisp:null,gFill),
               G(ga.totU||null,gFill),
-              GF(fTrAvg,ga.trAvg||null,gFill),
-              GF(fTrPy,ga.trPy||null,gFill),
-              GF(fAskPy,ga.askPy||null,gFill),
-              GF(fKbPy,ga.kbPy||null,gFill)
+              G(ga.trAvg||null,gFill),
+              G(ga.trPy||null,gFill),
+              G(ga.askPy||null,gFill),
+              G(ga.kbPy||null,gFill)
             ]);
           }
         }
-        // 이 그룹을 대표하는 행 번호(단독타입 행, 또는 방금 만든 그룹평균 행)를 그랜드토탈용으로 기록
-        childRowNums.push(R+ROW_OFFSET);
-        groupRanges.push({grng, g});
       });
       const dataEndR=R-1;
-      // ── 전체 평균 행 (파랑, 수식 내장) ──────────────────────────────
-      // ★ n-평균(그룹평균) 행이 있으면 그 행만, 없으면(단독타입) 타입 행 자체를 참조 (leaf 직접평균 아님)
-      const avgRowNum=R+1;
-      const fTrAvg=_wf(4,childRowNums,false);
-      const fTrPy=_wf(5,childRowNums,false);
-      const fAskPy=_wf(6,childRowNums,false);
-      const fKbPy=_wf(7,childRowNums,false);
+      // ── 전체 평균 행 (파랑) ──────────────────────────────
+      // ★ 그룹평균 행과 마찬가지로 엑셀 수식이 아닌, 앱이 계산한 정적값을 그대로 기입 (이유는 위 그룹평균 주석 참고)
       if(hasRent){
         const wJsAvg=wtdPrice(TR,r=>r.yd.jsAvg||0);
         const wJsPy=wtdPyPrice(TR,r=>r.yd.jsAvg||0);
@@ -2402,27 +2339,21 @@ function exportExcel(){
         const wSaleP=wtdPrice(TR,r=>r.yd.salePrice||0);
         const wY1=wSaleP&&wConvRent&&wStdDep?(wConvRent*12)/(wSaleP-wStdDep)*100:null;
         const wY2=wSaleP&&wConvRent&&wStdDep?(()=>{const la=wSaleP*0.5;const eq=wSaleP-la-wStdDep;return eq>0?(wConvRent*12-la*0.045)/eq*100:null;})():null;
-        const fJsAvg=_wf(8,childRowNums,false);
-        const fJsPy=_wf(9,childRowNums,false);
-        const fStdDep=_wf(10,childRowNums,false);
-        const fConvRent=_wf(11,childRowNums,false);
-        const fY1=_wf(12,childRowNums,true);
-        const fY2=_wf(13,childRowNums,true);
         pushRow([
           A('평균',aFill),
           AP(wExclPy?Math.round(wExclPy*100)/100:null,aFill),
           AP(wDispPy?Math.round(wDispPy*100)/100:null,aFill),
           A(totU||null,aFill),
-          AF(fTrAvg, wTrAvg?Math.round(wTrAvg):null, aFill),
-          AF(fTrPy, wTrPy||null, aFill),
-          AF(fAskPy, wAskPy||null, aFill),
-          AF(fKbPy, wKbPy||null, aFill),
-          AF(fJsAvg, wJsAvg?Math.round(wJsAvg):null, aFill),
-          AF(fJsPy, wJsPy||null, aFill),
-          AF(fStdDep, wStdDep||null, aFill),
-          AF(fConvRent, wConvRent?Math.round(wConvRent):null, aFill),
-          AFS(fY1, wY1!=null?wY1.toFixed(1)+'%':'', aFill),
-          AFS(fY2, wY2!=null?wY2.toFixed(1)+'%':'', aFill)
+          A(wTrAvg?Math.round(wTrAvg):null, aFill),
+          A(wTrPy||null, aFill),
+          A(wAskPy||null, aFill),
+          A(wKbPy||null, aFill),
+          A(wJsAvg?Math.round(wJsAvg):null, aFill),
+          A(wJsPy||null, aFill),
+          A(wStdDep||null, aFill),
+          A(wConvRent?Math.round(wConvRent):null, aFill),
+          {v:wY1!=null?wY1.toFixed(1)+'%':'',t:'s',s:{font:{...FONT,bold:true},fill:aFill,alignment:{horizontal:'center',vertical:'center'},border:ALLB}},
+          {v:wY2!=null?wY2.toFixed(1)+'%':'',t:'s',s:{font:{...FONT,bold:true},fill:aFill,alignment:{horizontal:'center',vertical:'center'},border:ALLB}}
         ]);
       } else {
         pushRow([
@@ -2430,10 +2361,10 @@ function exportExcel(){
           AP(wExclPy?Math.round(wExclPy*100)/100:null,aFill),
           AP(wDispPy?Math.round(wDispPy*100)/100:null,aFill),
           A(totU||null,aFill),
-          AF(fTrAvg, wTrAvg?Math.round(wTrAvg):null, aFill),
-          AF(fTrPy, wTrPy||null, aFill),
-          AF(fAskPy, wAskPy||null, aFill),
-          AF(fKbPy, wKbPy||null, aFill)
+          A(wTrAvg?Math.round(wTrAvg):null, aFill),
+          A(wTrPy||null, aFill),
+          A(wAskPy||null, aFill),
+          A(wKbPy||null, aFill)
         ]);
       }
       const avgR=R-1;
@@ -2537,14 +2468,6 @@ function exportExcel(){
           const addr=XLSX.utils.encode_cell({r:ri,c:ciIdx});
           if(!ws[addr])ws[addr]={v:cellObj.v!=null?cellObj.v:'',t:typeof cellObj.v==='number'?'n':'s'};
           if(cellObj.s)ws[addr].s=cellObj.s;
-          if(cellObj.f){
-            ws[addr].f=cellObj.f;
-            // 캐시값 타입을 실제 계산결과 타입에 맞게 설정 (수치평균은 n, 수익률(%) 텍스트 수식은 str)
-            // 과거엔 무조건 t='n'+v=0으로 강제해, 데이터 없는 평균이 재계산 전까지 "0"으로 보이고
-            // %텍스트 수식(임대수익률)의 캐시 타입이 어긋나는 문제가 있었음
-            if(typeof cellObj.v==='number'){ws[addr].t='n';}
-            else{ws[addr].t='str';if(ws[addr].v==null)ws[addr].v='';}
-          }
         }
       });
     });
@@ -2601,9 +2524,6 @@ function exportExcel(){
     const sn=sheetName.length>31?sheetName.slice(0,31):sheetName;
     XLSX.utils.book_append_sheet(wb,ws,sn);
   });
-  // 엑셀이 열릴 때 캐시된 값 대신 항상 수식을 재계산하도록 강제 (미입력 항목이 0으로 보이는 문제 방지)
-  wb.Workbook=wb.Workbook||{};
-  wb.Workbook.CalcPr={fullCalcOnLoad:true};
   const fname='부동산시장조사_'+new Date().toISOString().slice(0,10)+'.xlsx';
   XLSX.writeFile(wb,fname);
   showMsg('msg-exp','"'+fname+'" 다운로드 완료 ('+Object.keys(groups).length+'개 시트)','ms');
