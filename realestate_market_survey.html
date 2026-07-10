@@ -315,20 +315,29 @@ function wtdPrice(results,getVal){
   results.forEach(r=>{const v=getVal(r);if(v&&v>0){sp+=v*(r.t.units||1);su+=(r.t.units||1);}});
   return su>0?sp/su:null;
 }
-// 가중평균 평당가: 단지평균가 / 단지가중평균평형
-function wtdPyPrice(results,getVal){
-  let sp=0,su=0,spy=0;
-  results.forEach(r=>{
-    const v=getVal(r);
-    if(v&&v>0&&r.pyBase>0){const u=r.t.units||1;sp+=v*u;su+=u;spy+=r.pyBase*u;}
-  });
-  if(!su||!spy)return null;
-  return Math.round((sp/su)/(spy/su));
-}
 const pyOf=(price,py)=>price>0&&py>0?Math.round(price/py):null;
+// 가중평균 평당가: 타입별 평당가(가격÷평형, 엑셀의 평당가 열과 동일하게 타입별로 먼저 계산)를
+// 세대수로 가중평균 — 평균가÷평균평형(비율의 비율) 방식이 아님. 엑셀 수식(타입별 평당가 열을
+// 그대로 가중평균)과 결과가 정확히 일치하도록 계산 방식을 맞춤.
+function wtdPyPrice(results,getVal){
+  let sp=0,su=0;
+  results.forEach(r=>{
+    const py=pyOf(getVal(r),r.pyBase);
+    if(py!=null){const u=r.t.units||1;sp+=py*u;su+=u;}
+  });
+  return su>0?Math.round(sp/su):null;
+}
 const N=v=>v!=null&&!isNaN(v)?Math.round(v).toLocaleString()+'만':'<span class="nc">-</span>';
 const P=(v,py)=>{const r=pyOf(v,py);return r!=null?r.toLocaleString()+'만':'<span class="nc">-</span>';};
 const pct=v=>v!=null?v.toFixed(1)+'%':'<span class="nc">-</span>';
+// 여러 타입(월세 데이터 있는 타입들)의 환산보증금 기준 중 최빈값 채택 — 그룹평균/전체평균 공통 사용
+function modeStdDep(results){
+  const freq={};
+  results.forEach(function(r){const sd=r.yd.wolseResult?.stdDep;if(sd!=null)freq[sd]=(freq[sd]||0)+1;});
+  const keys=Object.keys(freq);
+  if(!keys.length)return null;
+  return parseInt(keys.sort(function(a,b){return freq[b]-freq[a];})[0]);
+}
 
 // ═══════════════════════════════════════════════════════════
 // 타입 그룹 평균 계산: groupLabel 기준으로 그룹핑, 각 그룹의 가중평균 반환
@@ -355,24 +364,21 @@ function calcGroupAvg(types, oft){
     return s.cnt?s.sum/s.cnt:null;
   }
   function wavg(fn){const v=wavgRaw(fn);return v!=null?Math.round(v):null;}
+  // 타입별 평당가(가격÷평형)를 먼저 구하고 그 값들을 세대수로 가중평균 — wtdPyPrice와 동일한 방식.
+  // (평균가÷평균평형 방식이 아님. 엑셀의 평당가 열을 그대로 가중평균하는 수식과 일치시킴)
   function wavgPy(priceFn,pyFn){
-    const s=types.reduce(function(a,r){const v=priceFn(r),py=pyFn(r);return v&&py?{sp:a.sp+v*(r.t.units||1),su:a.su+(r.t.units||1)}:a;},{sp:0,su:0});
-    const wpy=types.reduce(function(a,r){const py=pyFn(r);return py?{sp:a.sp+py*(r.t.units||1),su:a.su+(r.t.units||1)}:a;},{sp:0,su:0});
-    if(!s.su||!wpy.su)return null;
-    return Math.round((s.sp/s.su)/(wpy.sp/wpy.su));
+    const s=types.reduce(function(a,r){
+      const py=pyOf(priceFn(r),pyFn(r));
+      return py!=null?{sum:a.sum+py*(r.t.units||1),cnt:a.cnt+(r.t.units||1)}:a;
+    },{sum:0,cnt:0});
+    return s.cnt?Math.round(s.sum/s.cnt):null;
   }
   const avgExcl=types.reduce(function(a,r){return a+r.t.exclPy*(r.t.units||1);},0)/totU;
   const avgDisp=types.reduce(function(a,r){return a+(oft?(r.t.contractPy||r.t.suppPy):r.t.suppPy)*(r.t.units||1);},0)/totU;
   // 수익률 계산
   const salePrice=wavgRaw(function(r){return r.yd.salePrice||0;});
   // 그룹 내 wolseResult가 있는 타입들 중 최빈 stdDep 채택 (types[0]에만 없으면 그룹 전체가 null이 되던 버그 수정)
-  const stdDep=(function(){
-    const freq={};
-    types.forEach(function(r){const sd=r.yd.wolseResult?.stdDep;if(sd!=null)freq[sd]=(freq[sd]||0)+1;});
-    const keys=Object.keys(freq);
-    if(!keys.length)return null;
-    return parseInt(keys.sort(function(a,b){return freq[b]-freq[a];})[0]);
-  })();
+  const stdDep=modeStdDep(types);
   const convRent=wavgRaw(function(r){return r.yd.wolseResult?.convRentAvg||0;});
   let gaY1=null,gaY2=null;
   if(salePrice&&convRent&&stdDep){
@@ -1903,7 +1909,7 @@ function renderResult(){
     var totWsCnt=TR.reduce(function(a,r){return r.yd.wolseResult?a+r.yd.wolseResult.cnt:a;},0);
     var wWsConvRentAvg=wtdPrice(TR.filter(function(r){return r.yd.wolseResult;}),function(r){return r.yd.wolseResult.convRentAvg||0;});
     var wWsSaleAvg=wtdPrice(TR.filter(function(r){return r.yd.wolseResult;}),function(r){return r.yd.salePrice||0;});
-    var wStdDep=TR.filter(function(r){return r.yd.wolseResult;}).length?TR.filter(function(r){return r.yd.wolseResult;})[0].yd.wolseResult.stdDep:null;
+    var wStdDep=modeStdDep(TR);
     var wY1=wWsSaleAvg&&wWsConvRentAvg&&wStdDep?(wWsConvRentAvg*12)/(wWsSaleAvg-wStdDep)*100:null;
     var wY2=wWsSaleAvg&&wWsConvRentAvg&&wStdDep?(function(){var la=wWsSaleAvg*0.5;var eq=wWsSaleAvg-la-wStdDep;return eq>0?(wWsConvRentAvg*12-la*0.045)/eq*100:null;})():null;
     var wRows=(function(){
@@ -2165,6 +2171,15 @@ function exportExcel(){
     const den=vCells.map((v,i)=>'IF(ISNUMBER('+v+'),'+wCells[i]+',0)').join('+');
     return 'IFERROR(('+num+')/('+den+'),"")';
   }
+  // 환산보증금 기준(500/1000/2000/3000) 최빈값 — 프로그램(modeStdDep)과 동일하게 평균이 아닌 최빈값 채택.
+  // MODE.SNGL은 텍스트("시세없음")·빈 셀을 자동으로 무시하므로 별도 ISNUMBER 처리가 필요 없음.
+  function _modeF(colIdx, rowNums){
+    colIdx = colIdx + 1;
+    if(!rowNums || rowNums.length===0) return null;
+    const col=_COLS[colIdx];
+    const cells=rowNums.map(n=>'$'+col+'$'+n).join(',');
+    return 'IFERROR(MODE.SNGL('+cells+'),"")';
+  }
 
   const GRAY={patternType:'solid',fgColor:{rgb:'D9D9D9'}};   // 헤더/실거래 라벨·월 회색
   const BLUE={patternType:'solid',fgColor:{rgb:'00B0F0'}};   // 아파트 평균행 밝은 파랑
@@ -2309,11 +2324,15 @@ function exportExcel(){
       }
       const dataStartR=R;
       const exGroups=calcTypeGroups(TR,oft);
-      const groupRanges=[];
-      const childRowNums=[]; // ★ 그랜드토탈이 참조할 행: 단독타입은 자기 행, 그룹은 그룹평균 행
+      // ★ 그랜드토탈(전체 평균)은 그룹평균 행이 아니라 "개별 타입 행 전체"를 직접 참조한다.
+      // 프로그램(wtdPrice/wtdPyPrice)이 항상 개별 타입을 세대수로 가중평균해 전체평균을 내는 것과
+      // 동일한 방식으로 맞추기 위함 — 그룹 대표행(그룹 전체 세대수로 가중)을 거치면 그룹 내 일부
+      // 타입만 값이 없는 경우 가중치 처리가 달라져 프로그램 화면 값과 어긋날 수 있었음.
+      const allTypeRowNums=[];
       exGroups.forEach(g=>{
         const gStartR=R;
         g.types.forEach(r=>{
+          allTypeRowNums.push(R+1+ROW_OFFSET); // 이 타입 행이 pushRow 이후 위치할 1-based 엑셀 행 번호
           const wr=r.yd.wolseResult;const y=wr?.yld;
           if(hasRent){
             pushRow([
@@ -2342,7 +2361,7 @@ function exportExcel(){
           // ★ 그룹평균 행: 평형(전용/공급/계약)은 그대로 정적값, 나머지는 수식으로 그룹 내 타입행을 가중평균
           const fTrAvg=_wf(4,rowNums,false), fTrPy=_wf(5,rowNums,false), fAskPy=_wf(6,rowNums,false), fKbPy=_wf(7,rowNums,false);
           if(hasRent){
-            const fJsAvg=_wf(8,rowNums,false), fJsPy=_wf(9,rowNums,false), fStdDep=_wf(10,rowNums,false), fConvRent=_wf(11,rowNums,false);
+            const fJsAvg=_wf(8,rowNums,false), fJsPy=_wf(9,rowNums,false), fStdDep=_modeF(10,rowNums), fConvRent=_wf(11,rowNums,false);
             const fY1=_wf(12,rowNums,true), fY2=_wf(13,rowNums,true);
             pushRow([
               G(gLabel,gFill),
@@ -2373,32 +2392,28 @@ function exportExcel(){
             ]);
           }
         }
-        // 이 그룹을 대표하는 행 번호(단독타입 행, 또는 방금 만든 그룹평균 행)를 그랜드토탈용으로 기록
-        childRowNums.push(R+ROW_OFFSET);
-        groupRanges.push({grng, g});
       });
       const dataEndR=R-1;
       // ── 전체 평균 행 (파랑, 수식 내장) ──────────────────────────────
-      // ★ n-평균(그룹평균) 행이 있으면 그 행만, 없으면(단독타입) 타입 행 자체를 참조 (leaf 직접평균 아님)
       const avgRowNum=R+1;
-      const fTrAvg=_wf(4,childRowNums,false);
-      const fTrPy=_wf(5,childRowNums,false);
-      const fAskPy=_wf(6,childRowNums,false);
-      const fKbPy=_wf(7,childRowNums,false);
+      const fTrAvg=_wf(4,allTypeRowNums,false);
+      const fTrPy=_wf(5,allTypeRowNums,false);
+      const fAskPy=_wf(6,allTypeRowNums,false);
+      const fKbPy=_wf(7,allTypeRowNums,false);
       if(hasRent){
         const wJsAvg=wtdPrice(TR,r=>r.yd.jsAvg||0);
         const wJsPy=wtdPyPrice(TR,r=>r.yd.jsAvg||0);
-        const wStdDep=TR.find(r=>r.yd.wolseResult)?.yd.wolseResult?.stdDep||null;
+        const wStdDep=modeStdDep(TR);
         const wConvRent=wtdPrice(TR.filter(r=>r.yd.wolseResult),r=>r.yd.wolseResult.convRentAvg||0);
         const wSaleP=wtdPrice(TR,r=>r.yd.salePrice||0);
         const wY1=wSaleP&&wConvRent&&wStdDep?(wConvRent*12)/(wSaleP-wStdDep)*100:null;
         const wY2=wSaleP&&wConvRent&&wStdDep?(()=>{const la=wSaleP*0.5;const eq=wSaleP-la-wStdDep;return eq>0?(wConvRent*12-la*0.045)/eq*100:null;})():null;
-        const fJsAvg=_wf(8,childRowNums,false);
-        const fJsPy=_wf(9,childRowNums,false);
-        const fStdDep=_wf(10,childRowNums,false);
-        const fConvRent=_wf(11,childRowNums,false);
-        const fY1=_wf(12,childRowNums,true);
-        const fY2=_wf(13,childRowNums,true);
+        const fJsAvg=_wf(8,allTypeRowNums,false);
+        const fJsPy=_wf(9,allTypeRowNums,false);
+        const fStdDep=_modeF(10,allTypeRowNums);
+        const fConvRent=_wf(11,allTypeRowNums,false);
+        const fY1=_wf(12,allTypeRowNums,true);
+        const fY2=_wf(13,allTypeRowNums,true);
         pushRow([
           A('평균',aFill),
           AP(wExclPy?Math.round(wExclPy*100)/100:null,aFill),
