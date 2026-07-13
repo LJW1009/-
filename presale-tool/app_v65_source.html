@@ -1581,15 +1581,22 @@ function deleteUnit() {
 // 유료 Pro 버전 전용) - 실사례 검증 중 실제로 생성된 xlsx의 styles.xml에 커스텀 폰트/배경색/테두리가
 // 전혀 기록되지 않는 것을 확인하고 교체를 결정했다.
 const FW='#,##0_);[Red]\\(#,##0\\)';const FP='0.00%';const FD='yyyy.mm.dd';
-const FLN={type:'pattern',pattern:'solid',fgColor:{argb:'FFECC3B2'}};
+// 단지명 제목행 배경색: 오피스텔=자주(강조4) 40% 더 밝게, 아파트=주황(강조6) 40% 더 밝게
+// (Office 2007-2010 테마 색상표 기준 - 강조4 8064A2, 강조6 F79646을 Excel의 "40% 더 밝게"
+// 공식(새값 = 원값*0.6 + 255*0.4)으로 계산한 값).
+const FLN_OFF={type:'pattern',pattern:'solid',fgColor:{argb:'FFB3A2C7'}};
+const FLN_APT={type:'pattern',pattern:'solid',fgColor:{argb:'FFFAC090'}};
 const FSB={type:'pattern',pattern:'solid',fgColor:{argb:'FFFFFF00'}};
 const FTT={type:'pattern',pattern:'solid',fgColor:{argb:'FF00B0F0'}};
 const FGT={type:'pattern',pattern:'solid',fgColor:{argb:'FF70AD47'}};
 const FH={type:'pattern',pattern:'solid',fgColor:{argb:'FFDEEBF7'}};
 const FB={bold:true,size:12,name:'나눔바른고딕'};
 const FT={bold:true,size:20,name:'나눔바른고딕'};
-const AC={horizontal:'center',vertical:'center',wrapText:true};
-const AL={horizontal:'left',vertical:'center',wrapText:true};
+// ExcelJS는 세로 정렬 값으로 'center'가 아니라 'middle'을 쓴다('center'를 넘기면
+// 유효하지 않은 값으로 조용히 무시되어 세로 정렬 속성 자체가 파일에 기록되지 않고,
+// 그러면 엑셀은 기본값인 "아래쪽 정렬"로 표시한다 - 실제로 열어보기 전엔 코드만 봐서는
+// 알 수 없는 함정이었다).
+const AC={horizontal:'center',vertical:'middle',wrapText:true};
 const BTHIN={style:'thin'};const BMED={style:'medium'};
 const BR_HDR={top:BMED,bottom:BTHIN};
 const BR_TOP_THIN={top:BTHIN};
@@ -1609,7 +1616,9 @@ function setCell(ws,r,c,v,f,fi,a,nf,bd){
   // ExcelJS가 병합 처리 중 전달받은 border 객체를 제자리에서 변형하는 경우가 있어
   // (다른 위치의 병합이 이미 적용된 셀의 테두리까지 덩달아 사라지는 회귀 원인이었음)
   // 매번 깊은 복사본을 넘겨 셀 간 의도치 않은 상태 공유를 차단한다.
-  if(f)cell.font=f;if(fi)cell.fill=fi;if(a)cell.alignment=a;if(nf)cell.numFmt=nf;if(bd)cell.border=JSON.parse(JSON.stringify(bd));
+  // 정렬은 모든 셀이 가운데(가로)+가운데(세로) 정렬이어야 한다는 요구에 따라, 별도로
+  // 넘긴 값이 없으면(border/값만 채우는 호출 포함) 기본값으로 항상 가운데 정렬을 적용한다.
+  if(f)cell.font=f;if(fi)cell.fill=fi;cell.alignment=a||AC;if(nf)cell.numFmt=nf;if(bd)cell.border=JSON.parse(JSON.stringify(bd));
 }
 function buildBlock(ws,unit,startRow){
   let r=startRow;
@@ -1633,14 +1642,29 @@ function buildBlock(ws,unit,startRow){
     if(col===28)extra.right=BMED;
     return Object.keys(extra).length?Object.assign({},base||{},extra):base;
   }
+  // 소계/평형합계/합계 행 배경색+테두리를 A~S(1~19열) 전체에 끊김 없이 두른다(값이 없는
+  // 칸도 색/테두리는 있어야 "줄무늬처럼 중간이 비어보이는" 문제가 없다). 이 함수 호출
+  // "뒤"에 나오는 개별 sc() 호출(라벨/합계 수식 등)이 같은 칸을 값과 함께 다시 덮어써도
+  // 테두리·배경색은 여기서 준 것과 동일해 시각적으로 달라지지 않는다.
+  // 21~27열(특공기타~경쟁률)은 배경색은 그대로 두되(청약현황 블록은 메인 표와 다른
+  // 구획이라 별색을 칠하지 않음) 위/아래 테두리만 이어서, "경쟁률 칸 아래 테두리가
+  // 비어 있는" 끊김을 없앤다. T(20)/AB(28)는 표 전체를 관통하는 medium 구획선 전용
+  // 칸이라 그대로 두고(참고 서식 예시에서 위/아래 테두리 없음을 확인) 손대지 않는다.
+  function fillSummaryRow(fill,base){
+    for(let col=1;col<=19;col++){
+      const extra=col===1?{left:BMED}:{};
+      sc(col,undefined,null,fill,null,null,Object.assign({},base,extra));
+    }
+    for(let col=21;col<=27;col++)sc(col,undefined,null,null,null,null,base);
+  }
   // 중도금 이자 계산 블록(금리/회차별 날짜·일수·이자) 시작 열: 메인 표(청약 현황까지, 1~28열)
   // 끝에서 두 칸 띄운 자리 - 실사용 서식 예시(수정 후 파일)에서 확인된 배치를 그대로 따른다.
   const RATE_COL=31, DATE_COL0=32, MOVEIN_COL=38; // AE, AF~AK(6회차), AL
   const titleRow=r;
-  rhi(45);sc(1,unit.name+(unit.kind==='아파트'?'(아파트)':'(오피스텔)'),FT,FLN,AL);
+  rhi(45);sc(1,unit.name+(unit.kind==='아파트'?'(아파트)':'(오피스텔)'),FT,isOfficetel?FLN_OFF:FLN_APT,AC);
   ws.mergeCells(titleRow,1,titleRow,28);r++;
-  rhi(17.25);sc(1,'오픈일 : '+(unit.open_date||''),FB,null,AL);r++;
-  rhi(17.25);sc(1,'입주일 : '+(unit.move_in||''),FB,null,AL);r++;
+  rhi(17.25);sc(1,'오픈일 : '+(unit.open_date||''),FB,null,AC);r++;
+  rhi(17.25);sc(1,'입주일 : '+(unit.move_in||''),FB,null,AC);r++;
   const h1r=r;rhi(35.25);
   // 평당가 산정 기준: 아파트는 공급면적(공급평수), 오피스텔은 전용면적(전용평수) 기준.
   // 청약 접수건수(특별공급/1·2순위)·합계·경쟁률·비고까지만 다루고(20~28열), 계약
@@ -1713,7 +1737,7 @@ function buildBlock(ws,unit,startRow){
           sc(26,`=SUM(${colLetter(20)}${r}:${colLetter(25)}${r})`,null,null,AC,null,topBd);
           sc(27,`=${colLetter(26)}${r}/D${r}`,null,null,AC,'0.00',topBd);
         }
-        if(t.remark)sc(28,t.remark,null,null,AL,null,bd28);
+        if(t.remark)sc(28,t.remark,null,null,AC,null,bd28);
         else sc(28,undefined,null,null,null,null,bd28);
       } else {
         // 첫 행이 아닌 모든 행(중간/마지막): 병합 상자 값은 첫 행에만 있으므로 테두리만 이어간다.
@@ -1750,7 +1774,11 @@ function buildBlock(ws,unit,startRow){
     if(lastRi>0)[1,2,3,4,5].forEach(col=>ws.mergeCells(ds,col,ds+lastRi,col));
     if(dongUniform)ws.mergeCells(ds,6,ds+lastRi,6);
     const de=r-1,sr=r;rhi(16.9);
+    fillSummaryRow(FSB,BR_TOPBOT_THIN);
     sc(1,'소계',FB,FSB,AC,null,Object.assign({left:BMED},BR_TOPBOT_THIN));sc(8,`=SUM(H${ds}:H${de})`,FB,FSB,AC,null,BR_TOPBOT_THIN);
+    // 전용/공급(계약)면적 평당가 분모(C열)는 한 타입 안에서 항상 같은 값(A~E가 세로
+    // 병합된 이유와 동일)이므로, 평형합계/합계처럼 가중평균할 필요 없이 그 값을 그대로 참조한다.
+    sc(3,`=C${ds}`,FB,FSB,AC,'#,##0.00',BR_TOPBOT_THIN);
     ['I','J','K','L','M','N','O','P','Q','R','S'].forEach(cl=>sc(cl.charCodeAt(0)-64,`=SUMPRODUCT(${cl}${ds}:${cl}${de},$H$${ds}:$H$${de})/$H$${sr}`,FB,FSB,AC,FW,BR_TOPBOT_THIN));
     sc(20,undefined,null,null,null,null,{left:BMED});
     sc(28,undefined,null,null,null,null,{right:BMED});
@@ -1769,6 +1797,7 @@ function buildBlock(ws,unit,startRow){
   groupOrder.forEach(gkey=>{
     const mem=groups[gkey];
     const gr=r;rhi(16.9);
+    fillSummaryRow(FGT,BR_TOPBOT_THIN);
     sc(1,gkey+'합계',FB,FGT,AC,null,Object.assign({left:BMED},BR_TOPBOT_THIN));
     sc(4,`=${mem.map(m=>'D'+m.ds).join('+')}`,FB,FGT,AC,null,BR_TOPBOT_THIN);
     sc(8,`=${mem.map(m=>'H'+m.sr).join('+')}`,FB,FGT,AC,null,BR_TOPBOT_THIN);
@@ -1780,6 +1809,7 @@ function buildBlock(ws,unit,startRow){
     r++;
   });
   const tr=r;rhi(17.25);
+  fillSummaryRow(FTT,BR_GRAND);
   sc(1,'합계',FB,FTT,AC,null,Object.assign({left:BMED},BR_GRAND));
   sc(8,`=${subs.map(x=>'H'+x.sr).join('+')}`,FB,FTT,AC,null,BR_GRAND);
   sc(4,`=H${tr}`,FB,FTT,AC,null,BR_GRAND);
