@@ -15,8 +15,8 @@
 | 파일 | 역할 |
 |---|---|
 | `parser.js` | 파서(공유 엔진): `parseAreaSection`, `parsePriceSection`, `parseBalconySection`, `parseOptionSection`, `extractMeta` |
-| `excel.js` | (레거시 UI용) 엑셀 빌더: `buildBlock(sd, merges, rh, unit, startRow)` |
-| `app_v65_source.html` | **기본 UI** 원본(다크테마, 사이드바 지역트리, 데이터수정/원본 탭, 삭제, 37열 엑셀 서식 등 포함). 내부 파서 구간은 build 시 제거되고 `parser.js`+`adapter_v65.js`로 교체됨 |
+| `excel.js` | (레거시 UI용) 엑셀 빌더: `buildBlock(sd, merges, rh, unit, startRow)`, SheetJS 기반 |
+| `app_v65_source.html` | **기본 UI** 원본(다크테마, 사이드바 지역트리, 데이터수정/원본 탭, 삭제, 37열 엑셀 서식 등 포함). 내부 파서 구간은 build 시 제거되고 `parser.js`+`adapter_v65.js`로 교체됨. 엑셀 빌더(`buildBlock`)는 ExcelJS 기반(아래 "엑셀 내보내기 스타일/구조" 참고) |
 | `adapter_v65.js` | `app_v65_source.html`이 기대하는 호출 규약(`parsePriceSection`이 code→rows 맵을 반환, `extractMeta`가 날짜를 문자열로 반환 등)으로 `parser.js`를 감싸는 얇은 어댑터 |
 | `build_v65.js` | **기본 빌드**: `app_v65_source.html`의 옛 파서 구간을 제거하고 `parser.js`+`adapter_v65.js`를 삽입해 `dist/분양가정리.html` 생성 |
 | `app.html` / `logic.js` / `build.js` | 레거시 UI 및 빌드 (참고용으로 유지) |
@@ -27,16 +27,18 @@
 | `e2e_test.js`, `e2e_real_test.js` | 레거시 UI 브라우저(Playwright) 종단 테스트 |
 | `e2e_v65_test.js`, `e2e_v65_songdo_test.js`, `e2e_v65_goyang_test.js`, `e2e_v65_sihwamtv_test.js` | **기본 UI** 브라우저 종단 테스트 (실제 원문 4건으로 분석→추가→요약/수정/원본 탭→삭제→엑셀/JSON 다운로드까지 검증) |
 | `e2e_pdf_upload_test.js`, `e2e_v65_hillstate_dunsan_test.js`, `e2e_v65_songdo_pdf_test.js` | **PDF 첨부** 브라우저 종단 테스트 (실제 파일 입력에 실사례 PDF를 첨부해 자동 인식→분석→추가까지 검증) |
-| `vendor/xlsx.full.min.js` | SheetJS 번들 (오프라인 사용을 위해 체크인됨) |
+| `e2e_v65_excel_style_test.js` | **기본 UI 엑셀 내보내기** 셀 스타일/구조 회귀 테스트 (다운로드한 xlsx를 ExcelJS로 재로드해 폰트/배경색/테두리/행높이/열너비/평당가 기준까지 실제 저장됐는지 검증) |
+| `vendor/xlsx.full.min.js` | SheetJS 번들 (레거시 UI `excel.js` 및 오프라인 사용을 위해 체크인됨) |
+| `vendor/exceljs.min.js` | ExcelJS 번들(MIT) - **기본 UI** 엑셀 내보내기용, `app_v65_source.html`에 직접 인라인됨(SheetJS 커뮤니티판은 셀 스타일 쓰기를 지원하지 않아 교체) |
 | `vendor/pdfjs.min.js`, `vendor/pdfjs.worker.min.js` | pdf.js(Mozilla) legacy 빌드 - PDF 텍스트 추출용, `app_v65_source.html`에 직접 인라인됨 |
 | `fixtures/*.pdf` | PDF 첨부 기능 테스트용 실사례 분양광고 PDF (시화MTV 푸르지오 디오션 오피스텔, 힐스테이트 둔산 오피스텔, 더샵 송도그란테르 G5-3블록 오피스텔) |
 
 ## 실행
 
 ```bash
-npm install              # xlsx/pdfjs-dist(테스트용), playwright(E2E용)
+npm install              # xlsx/exceljs/pdfjs-dist(테스트용), playwright(E2E용)
 npm test                 # 파서 114/114 + 엑셀 빌더 + PDF 추출 파이프라인 검증
-npm run test:e2e         # 브라우저 종단 테스트 (기본 UI + 레거시 UI + PDF 첨부, 합성/실제 데이터)
+npm run test:e2e         # 브라우저 종단 테스트 (기본 UI + 레거시 UI + PDF 첨부 + 엑셀 스타일, 합성/실제 데이터)
 npm run build            # dist/분양가정리.html 생성 (기본 UI, app_v65_source.html 기반)
 npm run build:legacy     # 레거시 UI로 다시 빌드하고 싶을 때만 사용
 ```
@@ -117,6 +119,53 @@ npm run build:legacy     # 레거시 UI로 다시 빌드하고 싶을 때만 사
   경우, 섹션 앵커는 "문서 순서상 첫 번째로 나오는" 것을 채택한다. 두 번째
   공고를 채우려면 필요한 페이지만 별도 PDF로 잘라서 첨부하거나, 직접 붙여넣어야
   한다.
+
+## 엑셀 내보내기 스타일/구조
+
+사용자가 제공한 실제 참고 엑셀(부동산 매입 검토용 정리본)을 직접 뜯어보고 발견한
+격차를 반영했다.
+
+- **SheetJS 커뮤니티판은 셀 스타일을 저장하지 않는다** — 가장 근본적인 원인이었다.
+  `app_v65_source.html`의 `buildBlock`이 폰트/배경색/테두리 스타일 객체를 지정하고
+  있었는데도, 실제로 다운로드된 xlsx의 `styles.xml`을 열어보면 커스텀 폰트/배경색/
+  테두리가 전혀 기록돼 있지 않았다(기본 Calibri 폰트 하나뿐). SheetJS(`xlsx` 패키지)의
+  스타일 **쓰기**는 유료 Pro 버전 전용 기능이라, 커뮤니티판은 스타일 객체를 조용히
+  버린다(에러 없음). 행 높이(`rh`)도 같은 이유로 계산은 되지만 실제로 워크시트에
+  적용하는 코드가 없어 버려지고 있었다. 스타일 쓰기를 지원하는 **ExcelJS**(MIT
+  라이선스)로 엑셀 생성 부분만 교체해 해결했다(`vendor/exceljs.min.js`, xlsx.js/pdf.js와
+  같은 방식으로 인라인). 레거시 UI(`app.html`)의 `excel.js`는 SheetJS를 그대로 쓰며
+  이 문제가 남아있지만, 참고용으로만 유지되는 UI라 우선순위가 낮다.
+- **아파트/오피스텔 평당가 산정 기준이 구분되지 않았다** — 아파트는 공급면적
+  기준(공급평수 = 공급면적×0.3025), 오피스�텔은 전용면적 기준(전용평수 =
+  전용면적×0.3025)으로 분모 자체가 다른데, `buildBlock`이 `unit.kind`와 무관하게
+  항상 공급면적 기준으로만 계산하고 있었다. 오피스텔 결과의 평당가 전체가 실제보다
+  낮게(계약면적이 전용면적보다 크므로) 나오는 문제였다. `kind`에 따라 C열 계산식과
+  헤더 라벨(공급면적/공급평수/공급세대수 ↔ 계약면적/전용평수/공급호실수)을 모두
+  분기하도록 고쳤다.
+- **같은 평형대 여러 타입을 묶은 집계 행이 없었다** — 참고 엑셀은 타입별 소계
+  외에, 약식표기 앞자리 숫자가 같은 타입들(예: "84A"+"84B")을 다시 가중평균한
+  "84합계" 같은 행을 추가로 넣어 비교를 돕는다. 이 중간 집계 레벨이 아예 없어서
+  타입이 여러 개인 평형대는 서로 비교하기 어려웠다. 코드의 숫자 접두부로 그룹을
+  묶어 타입 소계와 전체 합계 사이에 그룹 합계 행(초록색 배경)을 추가했다(전체
+  합계 자체는 참고 엑셀과 마찬가지로 이 그룹 행이 아니라 타입별 소계에서 직접
+  집계 — 그룹 행은 참고용 중간 집계일 뿐 계산 경로에 끼지 않는다).
+- **테두리 스타일이 전혀 없었다** — 타입 경계, 헤더 하단, 합계 상하단을 구분하는
+  테두리가 코드에 아예 없어 위 스타일 문제와 겹쳐 시각적 구획이 전혀 없었다.
+  헤더(위 medium/아래 thin), 타입 시작행(위 thin), 소계·그룹합계(위아래 thin),
+  전체합계(위 thin/아래 medium)로 참고 엑셀과 동일한 위계를 부여했다.
+- **청약 경쟁률(특별공급/1순위/2순위 접수건수)·계약 진행 현황(일자별 계약 건수,
+  잔여, 분양률)·청약일정 텍스트 컬럼은 헤더만 있고 값을 채우는 로직이 없다** —
+  이 데이터는 애초에 지금 UI/파서가 입력받지 않는 정보라(분양공고 원문에는 없고
+  분양 진행 중 실시간으로 갱신되는 자료), 엑셀 코드만 고쳐서는 채울 수 없다.
+  UI에 별도 입력 필드를 추가하는 건 후속 라운드로 분리했다.
+- **PDF에서 표를 읽기 순서 텍스트가 아니라 좌표 기반으로 인식하는 것**(제안된
+  개선 방향)은 이번 라운드에서 다루지 않았다. pdf.js가 글자 조각마다 x/y 좌표를
+  함께 주므로, 이를 이용해 행/열을 기하학적으로 재구성하면(OCR/LLM 없이) 지금의
+  "읽기 순서 이어붙이기" 방식보다 레이아웃이 복잡한 문서에 더 강건해질 여지가
+  있다. 별도 라운드로 설계·검증할 계획이다.
+
+`e2e_v65_excel_style_test.js`가 다운로드한 xlsx를 ExcelJS로 다시 읽어 위 항목들이
+실제 파일에 기록됐는지(값이 아니라 `styles.xml` 자체) 검증한다.
 
 ## 설계 원칙: 헤더 특수케이스 나열 대신 데이터의 내적 일관성으로 자가검증
 
