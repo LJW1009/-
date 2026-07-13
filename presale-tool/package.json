@@ -4,8 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "node run_tests.js && node run_tests_c.js && node run_tests_d.js && node run_tests_e.js && node run_tests_f.js && node run_tests_g.js && node run_tests_h.js && node run_tests_i.js && node run_tests_j.js && node run_tests_k.js && node test_excel.js && node test_pdf_extract.js",
-    "test:e2e": "node build.js && node e2e_test.js && node e2e_real_test.js && node build_v65.js && node e2e_v65_test.js && node e2e_v65_songdo_test.js && node e2e_v65_goyang_test.js && node e2e_v65_sihwamtv_test.js && node e2e_pdf_upload_test.js && node e2e_v65_hillstate_dunsan_test.js && node e2e_v65_songdo_pdf_test.js && node e2e_v65_excel_style_test.js && node e2e_v65_subscription_fields_test.js",
+    "test": "node run_tests.js && node run_tests_c.js && node run_tests_d.js && node run_tests_e.js && node run_tests_f.js && node run_tests_g.js && node run_tests_h.js && node run_tests_i.js && node run_tests_j.js && node run_tests_k.js && node run_tests_l.js && node test_excel.js && node test_pdf_extract.js",
+    "test:e2e": "node build.js && node e2e_test.js && node e2e_real_test.js && node build_v65.js && node e2e_v65_test.js && node e2e_v65_songdo_test.js && node e2e_v65_goyang_test.js && node e2e_v65_sihwamtv_test.js && node e2e_pdf_upload_test.js && node e2e_v65_hillstate_dunsan_test.js && node e2e_v65_songdo_pdf_test.js && node e2e_v65_excel_style_test.js && node e2e_v65_subscription_fields_test.js && node e2e_v65_meta_interest_fix_test.js",
     "build": "node build_v65.js",
     "build:legacy": "node build.js"
   },

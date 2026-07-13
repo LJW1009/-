@@ -23,7 +23,8 @@
         dong: row.dong || '',
         floor: (row.floor && row.floor.raw) ? row.floor.raw : String(row.floor || ''),
         units: row.units,
-        price: row.price
+        price: row.price,
+        mid_amounts: row.mid_amounts || []
       });
     });
     var midDates = r.midDates.filter(Boolean).map(function (d) { return fmtDate(d); });

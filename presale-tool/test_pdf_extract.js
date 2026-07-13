@@ -82,6 +82,10 @@ async function main() {
     !!r84e1t && r84e1t.floor.kind === 'list' && r84e1t.floor.floors.length === 2
       && r84e1t.floor.floors[0] === 11 && r84e1t.floor.floors[1] === 15 && r84e1t.price === 1008000000);
 
+  const opt2 = parser.parseOptionSection(sections2.option, codes2);
+  check('P11b', '옵션 섹션이 "추가선택 옵션품목 납부계좌" 이후 유의사항 산문까지 섞여 들어가지 않아, 그 산문 속 우연한 타입코드 언급("84A,B,C,D,E타입")이 84A 옵션가로 오인되지 않음',
+    sections2.option.indexOf('납부계좌') === -1 && opt2['84A'] === undefined);
+
   const pdfPath3 = path.join(__dirname, 'fixtures', 'songdo_g53_officetel.pdf');
   const full3 = await extractFullText(pdfPath3);
   check('P12', 'PDF 텍스트 추출(더샵 송도그란테르 G5-3블록 오피스텔): 최소 분량 이상 추출됨', full3.length > 10000);

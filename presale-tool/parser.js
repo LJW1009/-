@@ -992,6 +992,22 @@
     return text.slice(start, end).trim();
   }
 
+  // 발코니/옵션 섹션은 문서 마지막 쪽이라 그 뒤에 "다음 대분류 제목"(NEXT_MAJOR_SECTION_RE)이
+  // 없는 실제 문서가 많다. 이 경우 표 본문 뒤에 이어지는 긴 유의사항 산문까지 통째로
+  // 섹션에 포함되는데, 그 산문 속에 우연히 타입 코드가 언급되면(예: "84A,B,C,D,E타입은
+  // 소방 기준에 따라...") parseAmountByCodeSection이 이를 진짜 가격 행으로 오인해 엉뚱한
+  // 금액을 집어온다(실사례로 확인). "■"/"▣"는 실제 표 항목 각주(Ÿ/⦁/•)와 달리 예외 없이
+  // 새 대분류 제목에만 쓰이므로, 자기 자신의 제목 다음에 나오는 첫 "■"/"▣"를 안전한
+  // 종료 경계로 추가한다.
+  function findNextHeadingBoundary(text, afterIndex) {
+    if (afterIndex < 0) return -1;
+    var idx1 = text.indexOf('■', afterIndex + 1);
+    var idx2 = text.indexOf('▣', afterIndex + 1);
+    if (idx1 === -1) return idx2;
+    if (idx2 === -1) return idx1;
+    return Math.min(idx1, idx2);
+  }
+
   function splitDocumentSections(fullText) {
     var text = String(fullText || '');
     var areaStart = findEarliestMatch(text, SECTION_ANCHORS.area, 0);
@@ -1005,8 +1021,8 @@
 
     var area = sliceSection(text, areaStart, [priceStart]);
     var price = sliceSection(text, priceStart, [balconyStart, optionStart, nextMajorStart]);
-    var balcony = sliceSection(text, balconyStart, [optionStart, nextMajorStart]);
-    var option = sliceSection(text, optionStart, [nextMajorStart]);
+    var balcony = sliceSection(text, balconyStart, [optionStart, nextMajorStart, findNextHeadingBoundary(text, balconyStart)]);
+    var option = sliceSection(text, optionStart, [nextMajorStart, findNextHeadingBoundary(text, optionStart)]);
 
     if (areaStart >= 0 && priceStart >= 0) {
       var repaired = repairMisplacedAreaTable(area, price);

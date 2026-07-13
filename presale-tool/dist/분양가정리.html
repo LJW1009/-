@@ -1412,6 +1412,22 @@ function dateSerial(dt) {
     return text.slice(start, end).trim();
   }
 
+  // 발코니/옵션 섹션은 문서 마지막 쪽이라 그 뒤에 "다음 대분류 제목"(NEXT_MAJOR_SECTION_RE)이
+  // 없는 실제 문서가 많다. 이 경우 표 본문 뒤에 이어지는 긴 유의사항 산문까지 통째로
+  // 섹션에 포함되는데, 그 산문 속에 우연히 타입 코드가 언급되면(예: "84A,B,C,D,E타입은
+  // 소방 기준에 따라...") parseAmountByCodeSection이 이를 진짜 가격 행으로 오인해 엉뚱한
+  // 금액을 집어온다(실사례로 확인). "■"/"▣"는 실제 표 항목 각주(Ÿ/⦁/•)와 달리 예외 없이
+  // 새 대분류 제목에만 쓰이므로, 자기 자신의 제목 다음에 나오는 첫 "■"/"▣"를 안전한
+  // 종료 경계로 추가한다.
+  function findNextHeadingBoundary(text, afterIndex) {
+    if (afterIndex < 0) return -1;
+    var idx1 = text.indexOf('■', afterIndex + 1);
+    var idx2 = text.indexOf('▣', afterIndex + 1);
+    if (idx1 === -1) return idx2;
+    if (idx2 === -1) return idx1;
+    return Math.min(idx1, idx2);
+  }
+
   function splitDocumentSections(fullText) {
     var text = String(fullText || '');
     var areaStart = findEarliestMatch(text, SECTION_ANCHORS.area, 0);
@@ -1425,8 +1441,8 @@ function dateSerial(dt) {
 
     var area = sliceSection(text, areaStart, [priceStart]);
     var price = sliceSection(text, priceStart, [balconyStart, optionStart, nextMajorStart]);
-    var balcony = sliceSection(text, balconyStart, [optionStart, nextMajorStart]);
-    var option = sliceSection(text, optionStart, [nextMajorStart]);
+    var balcony = sliceSection(text, balconyStart, [optionStart, nextMajorStart, findNextHeadingBoundary(text, balconyStart)]);
+    var option = sliceSection(text, optionStart, [nextMajorStart, findNextHeadingBoundary(text, optionStart)]);
 
     if (areaStart >= 0 && priceStart >= 0) {
       var repaired = repairMisplacedAreaTable(area, price);
@@ -1497,7 +1513,8 @@ function dateSerial(dt) {
         dong: row.dong || '',
         floor: (row.floor && row.floor.raw) ? row.floor.raw : String(row.floor || ''),
         units: row.units,
-        price: row.price
+        price: row.price,
+        mid_amounts: row.mid_amounts || []
       });
     });
     var midDates = r.midDates.filter(Boolean).map(function (d) { return fmtDate(d); });
@@ -1625,8 +1642,15 @@ function clearForm() {
   document.getElementById('inp-int').value = '후불제';
   document.getElementById('inp-rate').value = '5';
   document.getElementById('prev-bar').style.display = 'none';
+  lastPdfFullText = null;
   try { localStorage.removeItem(FKEY); } catch(e) {}
 }
+// PDF 첨부로 채운 경우, 공고일/입주예정일 문구는 공급면적/공급금액 섹션 밖(예: 표
+// 앞뒤의 "■...로 분양신고", "■ 준공 및 입주예정일 : ...")에 있는 경우가 많아
+// splitDocumentSections가 잘라낸 4개 입력란만으로는 메타 정보를 찾지 못한다.
+// PDF 원문 전체를 보관해뒀다가 메타 추출 시에만 함께 검색한다(직접 붙여넣기 경로는
+// 영향 없음 - 이 값이 null이면 기존과 동일하게 입력란 텍스트만 사용).
+let lastPdfFullText = null;
 function getUnit(id) { return units.find(u => u.id === id); }
 
 /* ══════════════════════════════════════════════════════════
@@ -1666,6 +1690,7 @@ async function handlePdfUpload(input) {
     return;
   }
 
+  lastPdfFullText = full;
   const sections = splitDocumentSections(full);
   if (sections.found.area) document.getElementById('ta-area').value = sections.area;
   if (sections.found.price) document.getElementById('ta-price').value = sections.price;
@@ -1718,7 +1743,7 @@ function doParse() {
   const { midDates, priceRows } = parsePriceSection(f.taPrice, codes);
   const balcony = parseBalconySection(f.taBalc, codes);
   const options = parseOptionSection(f.taOpt, codes);
-  const meta = extractMeta(f.taPrice + '\n' + f.taArea);
+  const meta = extractMeta((lastPdfFullText ? lastPdfFullText + '\n' : '') + f.taPrice + '\n' + f.taArea);
 
   // 미리보기 칩
   const bar = document.getElementById('prev-bar');
@@ -1751,7 +1776,9 @@ function doAdd() {
     open_dt: openDt,
     move_in: `${my}.${String(mm).padStart(2,'0')} 예정`,
     move_in_dt: mvDt,
-    mid_dates: midDates.length===6 ? midDates.map(s=>parseDate(s)) : null,
+    // 6회 미만(2회/4회/5회 등 실제 실사례에서 흔한 구조)이어도 있는 만큼만 반영한다.
+    // 예전엔 정확히 6개가 아니면 통째로 버려 중도금 이자가 전부 0으로 계산됐었다.
+    mid_dates: midDates.length > 0 ? midDates.map(s=>parseDate(s)) : null,
     // 원본 입력 저장
     raw: { price: f.taPrice, area: f.taArea, balc: f.taBalc, opt: f.taOpt },
     types: areaTypes.map(t => ({
@@ -2225,12 +2252,14 @@ function buildBlock(ws,unit,startRow){
     if(!pairedHdrCols.has(cn))ws.mergeCells(r,cn,r+1,cn);
   });
   sc(56,unit.rate,FB,FH,AC,FP,BR_HDR);
-  ['BE','BF','BG','BH','BI','BJ'].forEach((cl,i)=>sc(55+i+1,dateSerial(mids[i]),FB,FH,AC,FD,BR_HDR));
+  // 중도금 회차가 6회 미만인 실사례(2회/4회/5회 등)가 흔해, 있는 회차 칸만 채우고
+  // 나머지는 빈 칸으로 둔다(0을 쓰면 1900년 근처 엉뚱한 날짜로 표시됨).
+  ['BE','BF','BG','BH','BI','BJ'].forEach((cl,i)=>{if(i<mids.length)sc(56+i+1,dateSerial(mids[i]),FB,FH,AC,FD,BR_HDR);});
   sc(63,dateSerial(mvDt),FB,FH,AC,FD,BR_HDR);r++;
   const h2r=r;rhi(34.9);
   {const h2={20:'당해',21:'기타',22:'당해',23:'기타',24:'당해',25:'기타'};
   Object.entries(h2).forEach(([c,v])=>sc(+c,v,FB,FH,AC));
-  mids.forEach((d,i)=>{const days=Math.round((mvDt-d)/86400000);sc(55+i+1,days,FB,FH,AC);});}
+  mids.forEach((d,i)=>{const days=Math.round((mvDt-d)/86400000);sc(56+i+1,days,FB,FH,AC);});}
   r++;
   const fd=r,subs=[];
   for(const t of unit.types){
@@ -2271,11 +2300,17 @@ function buildBlock(ws,unit,startRow){
       if(t.option_cost)sc(14,t.option_cost,null,null,AC,FW,topBd);
       sc(15,`=L${r}+N${r}`,null,null,AC,FW,topBd);sc(16,`=O${r}/${cRef}`,null,null,AC,FW,topBd);
       sc(17,`=BK${r}`,null,null,AC,FW,topBd);sc(18,`=Q${r}+O${r}`,null,null,AC,FW,topBd);sc(19,`=R${r}/${cRef}`,null,null,AC,FW,topBd);
-      // 이자 수식: 무이자 또는 중도금 없는 단지는 0
+      // 이자 수식: 무이자 또는 중도금 없는 단지는 0. 회차별 원금은 "분양가의 10%"로
+      // 가정하지 않고, 파서가 원문에서 그대로 읽은 실제 회차별 중도금 금액(row.mid_amounts)을
+      // 쓴다 - 회차마다 비율이 다른 실사례(예: 1차40%+2차10%)에서 10% 가정은 틀린 값을 낸다.
+      const ma=row.mid_amounts||[];
       if (isInterestFree || !hasMidDates) {
-        ['BE','BF','BG','BH','BI','BJ'].forEach((cl,i)=>sc(55+i+1,0,null,null,AC,FW));
+        ['BE','BF','BG','BH','BI','BJ'].forEach((cl,i)=>sc(56+i+1,0,null,null,AC,FW));
       } else {
-        ['BE','BF','BG','BH','BI','BJ'].forEach((cl,i)=>sc(55+i+1,`=(($I${r}*0.1)*$BD$${h1r})*(${cl}$${h2r}/365)`,null,null,AC,FW));
+        ['BE','BF','BG','BH','BI','BJ'].forEach((cl,i)=>{
+          const amt=(i<mids.length&&i<ma.length)?ma[i]:0;
+          sc(56+i+1,`=(${amt}*$BD$${h1r})*(${cl}$${h2r}/365)`,null,null,AC,FW);
+        });
       }
       sc(63,`=SUM(BE${r}:BJ${r})`,null,null,AC,FW);r++;
     });
