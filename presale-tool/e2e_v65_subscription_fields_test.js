@@ -1,11 +1,12 @@
 /*
- * v6.5 기반 산출물(dist/분양가정리.html) - 청약 접수건수/계약 진행 현황 입력 필드 회귀 테스트.
+ * v6.5 기반 산출물(dist/분양가정리.html) - 청약 접수건수 입력 필드 회귀 테스트.
  *
- * 이 데이터(특별공급/1·2순위 접수건수, 계약 일자별 건수, 청약일정 텍스트)는 분양공고
- * 원문에는 없고 분양 진행 중 실시간으로 갱신되는 정보라 파서가 채우지 않는다(엑셀
- * 내보내기 스타일/구조 개선 라운드에서 헤더만 있고 값이 빈 컬럼으로 확인된 항목).
- * "수정" 탭에 입력 필드를 추가해 사용자가 직접 입력하면 엑셀에 값/수식이 채워지고,
- * 입력하지 않은 타입은 여전히 빈 칸으로 남는지(억지로 0을 채우지 않는지) 검증한다.
+ * 이 데이터(특별공급/1·2순위 접수건수)는 분양공고 원문에는 없고 분양 진행 중 실시간으로
+ * 갱신되는 정보라 파서가 채우지 않는다. "수정" 탭에 입력 필드를 추가해 사용자가 직접
+ * 입력하면 엑셀에 값/수식이 채워지고, 입력하지 않은 타입은 여전히 빈 칸으로 남는지
+ * (억지로 0을 채우지 않는지) 검증한다.
+ * (계약 일차별 건수/계약총계/잔여/분양률/청약일정등 입력 필드는 엑셀 내보내기에서
+ *  해당 열 자체가 삭제됨에 따라 UI에서도 함께 제거됐다 - 더 이상 이 테스트 대상이 아니다.)
  */
 const { chromium } = require('playwright');
 const path = require('path');
@@ -41,10 +42,7 @@ async function main() {
   await page.fill('#e-r1-other-0', '80');
   await page.fill('#e-r2-local-0', '40');
   await page.fill('#e-r2-other-0', '10');
-  await page.fill('#e-cd0-0', '30');
-  await page.fill('#e-cd1-0', '15');
   await page.fill('#e-remark-0', '테스트 비고');
-  await page.fill('#e-sched-0', '특별공급 26.04.07\n1순위 26.04.08');
   await page.click('#btn-save-edit');
   await page.waitForFunction(() => document.getElementById('btn-save-edit').style.display === 'none');
 
@@ -70,14 +68,14 @@ async function main() {
   check('T02', '84A 1순위/2순위 당해·기타 값 반영',
     ws.getCell('V8').value === 250 && ws.getCell('W8').value === 80 && ws.getCell('X8').value === 40 && ws.getCell('Y8').value === 10);
   check('T03', '합계(Z) 수식 = SUM(T:Y), 경쟁률(AA) 수식 = Z/D', ws.getCell('Z8').value.formula === 'SUM(T8:Y8)' && ws.getCell('AA8').value.formula === 'Z8/D8');
-  check('T04', '계약 1~2일차 값 반영, 3~5일차는 입력 안 해서 빈 칸', ws.getCell('AC8').value === 30 && ws.getCell('AD8').value === 15 && ws.getCell('AE8').value == null);
-  check('T05', '계약총계(AH)/잔여(AI)/분양률(AJ) 수식 반영',
-    ws.getCell('AH8').value.formula === 'SUM(AC8:AG8)' && ws.getCell('AI8').value.formula === 'D8-AH8' && ws.getCell('AJ8').value.formula === 'AH8/D8');
-  check('T06', '비고/청약일정등 텍스트 반영', ws.getCell('AB8').value === '테스트 비고' && ws.getCell('AK8').value.includes('특별공급 26.04.07'));
+  check('T04', '비고 텍스트 반영', ws.getCell('AB8').value === '테스트 비고');
+  // 계약 1~5일차/계약총계/잔여/분양률/청약일정등(구 AC~AK) 열은 삭제됐다 - AC8은
+  // 이제 아무 값도 갖지 않는다(더 이상 계약 일차 입력 필드 자체가 UI에 없음).
+  check('T05', '계약 일차 등(구 AC~AK) 열이 삭제되어 값이 없음', ws.getCell('AC8').value == null);
 
   // 84B(입력 안 한 타입)는 값도 수식도 전혀 없어야 함(억지로 0을 채우지 않는다는 원칙 검증)
-  check('T07', '입력하지 않은 84B는 청약/계약 컬럼이 전부 빈 칸(0을 채우지 않음)',
-    ws.getCell('T20').value == null && ws.getCell('Z20').value == null && ws.getCell('AH20').value == null);
+  check('T06', '입력하지 않은 84B는 청약 컬럼이 전부 빈 칸(0을 채우지 않음)',
+    ws.getCell('T20').value == null && ws.getCell('Z20').value == null);
 
   console.log(`[e2e_v65_subscription_fields_test.js] ${pass}/${pass + fail} 통과`);
   if (errors.length) { console.log('--- 브라우저 에러 ---'); errors.forEach((e) => console.log(e)); }

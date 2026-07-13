@@ -84,8 +84,22 @@ async function main() {
     grand.value === '합계' && grand.fill.fgColor.argb === 'FF00B0F0'
       && grand.border.top.style === 'thin' && grand.border.bottom.style === 'medium');
 
-  check('S07', '제목 행 높이 45, 헤더 행 높이 47.25 실제 적용', wsApt.getRow(3).height === 45 && wsApt.getRow(6).height === 47.25);
-  check('S08', '컬럼 A 너비(13.25) 실제 적용', Math.abs(wsApt.getColumn(1).width - 13.25) < 0.01);
+  check('S07', '제목 행 높이 45, 헤더 행 높이 35.25 실제 적용', wsApt.getRow(3).height === 45 && wsApt.getRow(6).height === 35.25);
+  check('S08', '컬럼 A 너비(21) 실제 적용', Math.abs(wsApt.getColumn(1).width - 21) < 0.01);
+
+  // 계약 1~5일차/청약일정 등(구 AC~AK, 계약 진행 현황) 열은 삭제되어 존재하지 않는다.
+  check('S11', '계약 일차/청약일정 등 열이 삭제됨(AC6에 더 이상 "계약" 라벨이 없음)',
+    wsApt.getCell('AC6').value == null);
+  // 중도금 이자 계산 표(금리/회차별 날짜)는 이제 청약 현황 블록(1~28열) 바로 옆(AE~AL)에 위치한다.
+  check('S12', '중도금 이자 계산 표가 AE(금리)~AL(입주일) 위치로 이동', wsApt.getCell('AE6').value === 0 || typeof wsApt.getCell('AE6').value === 'number');
+  check('S13', '입주일이 AL6에 기록됨', wsApt.getCell('AL6').value instanceof Date);
+  // 표 전체 높이를 관통하는 좌우 구획선: T(특공당해)열 왼쪽 medium, AB(비고)열 오른쪽 medium.
+  check('S14', 'T열(특공당해) 왼쪽 medium 구획선이 헤더~합계 행까지 이어짐',
+    wsApt.getCell('T6').border.left.style === 'medium' && wsApt.getCell('T8').border.left.style === 'medium'
+      && wsApt.getCell('T33').border.left.style === 'medium');
+  check('S15', 'AB열(비고) 오른쪽 medium 구획선이 헤더~합계 행까지 이어짐',
+    wsApt.getCell('AB6').border.right.style === 'medium' && wsApt.getCell('AB8').border.right.style === 'medium'
+      && wsApt.getCell('AB33').border.right.style === 'medium');
 
   // 오피스텔 사례(힐스테이트 둔산) - 입력 탭으로 돌아가 새 단지 입력 후 그 단지만 선택해 내보내기
   await page.click('#ntab-inp');
