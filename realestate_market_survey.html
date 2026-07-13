@@ -1208,6 +1208,34 @@ function simScore(a,b){
   }
   return match/Math.max(na.length,nb.length);
 }
+// 시/도 정식명칭·구명칭(신/구)을 앱이 쓰는 축약형으로 정규화 — 예: "서울특별시"→"서울", "전북특별자치도"→"전북"
+// (같은 건설사 브랜드명이 여러 지역에 쓰여서 simScore만으로는 "래미안 강남" vs "래미안 강북"처럼
+//  이름이 비슷한 다른 지역 단지가 오인식되는 사고가 있었음 — CSV의 시군구로 지역이 확실히 다르면
+//  이름 유사도 점수와 무관하게 매칭에서 제외한다)
+const REGION_ALIASES=[
+  [['서울특별시','서울시'],'서울'],[['부산광역시','부산시'],'부산'],[['대구광역시','대구시'],'대구'],
+  [['인천광역시','인천시'],'인천'],[['광주광역시','광주시'],'광주'],[['대전광역시','대전시'],'대전'],
+  [['울산광역시','울산시'],'울산'],[['세종특별자치시','세종시'],'세종'],[['경기도'],'경기'],
+  [['강원특별자치도','강원도'],'강원'],[['충청북도','충북특별자치도'],'충북'],[['충청남도'],'충남'],
+  [['전북특별자치도','전라북도'],'전북'],[['전라남도'],'전남'],[['경상북도'],'경북'],[['경상남도'],'경남'],
+  [['제주특별자치도','제주도'],'제주'],
+];
+function normProvince(name){
+  name=(name||'').trim();
+  for(const[aliases,canon]of REGION_ALIASES){for(const al of aliases){if(name.startsWith(al))return canon;}}
+  return null;
+}
+// null=판단 불가(시군구 컬럼 없음 등, 이름 유사도만으로 판단) / true=일치 / false=확실히 다른 지역
+function regionMatches(cx,sigungu){
+  if(!sigungu)return null;
+  const parts=(cx.region||'').split(' ').filter(Boolean);
+  const cxCanon=normProvince(parts[0]);
+  const csvCanon=normProvince(sigungu);
+  if(cxCanon&&csvCanon&&cxCanon!==csvCanon)return false; // 시/도 자체가 다름 → 확실히 다른 단지
+  const minorTok=parts[1]; // 예: "강남구","양주시" — 소분류 첫 단어
+  if(minorTok&&!sigungu.replace(/\s/g,'').includes(minorTok.replace(/\s/g,'')))return false;
+  return true;
+}
 
 function processCSV(file,cid,type){
   // type: 'trade' | 'jeonse' | 'wolse'
@@ -1237,6 +1265,7 @@ function processCSV(file,cid,type){
 
       // 컬럼 인덱스 동적 탐색 (컬럼 순서 변경 대응)
       const ci_name   =hdrs.findIndex(h=>h.includes('단지명'));
+      const ci_sigungu=hdrs.findIndex(h=>h.includes('시군구'));
       const ci_type   =hdrs.findIndex(h=>h.includes('전월세구분'));
       const ci_excl   =hdrs.findIndex(h=>h.includes('전용면적'));
       const ci_ym     =hdrs.findIndex(h=>h.includes('계약년월'));
@@ -1281,14 +1310,26 @@ function processCSV(file,cid,type){
         return !d||d==='-'||!d.trim()||d.trim()==='-';
       });
 
-      // ── 단지명 매칭: 띄어쓰기 무시 + 70% 유사도 ──
+      // ── 단지명 매칭: 띄어쓰기 무시 + 70% 유사도. 단, 시군구가 확실히 다른 지역이면
+      // (같은 건설사 브랜드명이 여러 지역에 쓰여 이름만으로는 "래미안 강남"과 "래미안 강북"처럼
+      // 오인식될 수 있어) 이름 점수와 무관하게 제외한다.
+      let regionRejected=0;
       const matched=valid.filter(r=>{
         const csvName=ci_name>=0?(r.__vals[ci_name]||''):'';
+        const csvSigungu=ci_sigungu>=0?(r.__vals[ci_sigungu]||''):'';
+        if(regionMatches(cx,csvSigungu)===false){regionRejected++;return false;}
         if(!cx.name||!csvName)return true;
         return simScore(cx.name,csvName)>=0.7;
       });
 
       if(!matched.length){
+        if(regionRejected>0&&regionRejected===valid.length){
+          // 이름은 비슷해도 시군구가 전부 다른 지역이었던 경우 별도 안내
+          const sampleReg=[...new Set(valid.map(r=>ci_sigungu>=0?r.__vals[ci_sigungu]:'').filter(Boolean))].slice(0,3);
+          prev.innerHTML='<div class="msg me">CSV의 지역(시군구)이 등록된 단지 지역("'+cx.region+'")과 다릅니다.<br>'+
+            '<span style="font-size:11px">CSV 시군구 예시: '+sampleReg.join(' / ')+'</span></div>';
+          return;
+        }
         // 매칭 실패 시 단지명 샘플 보여주기
         const sampleNames=[...new Set(valid.map(r=>ci_name>=0?r.__vals[ci_name]:'').filter(Boolean))].slice(0,5);
         prev.innerHTML='<div class="msg me">단지명 일치 데이터가 없습니다.<br><span style="font-size:11px">CSV 단지명 예시: '+sampleNames.join(' / ')+'<br>입력된 단지명: '+cx.name+'</span></div>';
@@ -1390,6 +1431,7 @@ function importRentCSV(){
       if(!a.date||!b.date)return false; // 어느 쪽이든 date 없으면 중복 아님
       return a.typeName===b.typeName&&a.price===b.price&&a.floor===b.floor&&a.date===b.date;
     };
+  const allAdded=[]; // 실제로 새로 추가된 항목의 계약일 (날짜범위 표시용, 추가되는 시점에 바로 기록)
   Object.entries(monthGroups).forEach(function(e){
     var m=e[0],items=e[1];
     initMD(cid,m);
@@ -1398,6 +1440,7 @@ function importRentCSV(){
     items.forEach(function(t){
       if(!ex.find(function(e){return dupKey(e,t);})){
         ex.push(t);added++;
+        if(t.date)allAdded.push(t.date);
       } else {
         dupDetails.push(m+' '+t.typeName+' '+(t.price!=null?t.price+'만':(t.deposit+'/'+t.rent))+' '+t.floor+'층 ('+t.date+')');
       }
@@ -1412,18 +1455,6 @@ function importRentCSV(){
   const pr=document.getElementById(prevId);
 
   // ── 계약일 범위 계산 (실제 추가된 항목 기준)
-  // monthGroups는 파싱된 전체, addedDates는 실제 DB에 추가된 것만
-  const allAdded=[];
-  Object.entries(monthGroups).forEach(function(e){
-    var m=e[0],items=e[1];
-    var ex2=DB.marketData[cid]?.[m]?.[type==='trade'?'trades':type==='jeonse'?'jeonse':'wolse']||[];
-    items.forEach(function(t){
-      // 추가된 항목: ex2에 존재하고 date 있는 것
-      if(t.date&&ex2.some(function(e){return e.date===t.date&&(t.price!=null?e.price===t.price:e.deposit===t.deposit&&e.rent===t.rent)&&e.floor===t.floor;})){
-        allAdded.push(t.date);
-      }
-    });
-  });
   const datesSorted=allAdded.sort();
   const dateRangeHtml=datesSorted.length>=2
     ?'<span style="margin-left:4px;color:var(--t2)">계약일 '+datesSorted[0].slice(0,6)+'.'+datesSorted[0].slice(6,8)+' ~ '+datesSorted[datesSorted.length-1].slice(0,6)+'.'+datesSorted[datesSorted.length-1].slice(6,8)+'</span>'
