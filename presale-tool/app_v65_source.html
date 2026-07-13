@@ -1123,7 +1123,11 @@ function doAdd() {
       supply_units: t.supply_units,
       balcony_ext_cost: balcony[t.code] || 0,
       option_cost: options[t.code] || 0,
-      rows: priceRows[t.code] || []
+      rows: priceRows[t.code] || [],
+      // 청약 접수건수/계약 진행 현황 - 분양공고 원문에는 없고 진행 중 갱신되는 정보라
+      // 파서가 채우지 않으며, 수정 탭에서 직접 입력한다(입력 전엔 전부 빈 값).
+      sp_local: null, sp_other: null, r1_local: null, r1_other: null, r2_local: null, r2_other: null,
+      remark: '', contract_days: [null, null, null, null, null], schedule_note: ''
     }))
   };
   units.push(unit);
@@ -1350,6 +1354,30 @@ function renderEditTab(u) {
     });
     h += `</tbody></table>
       <button class="add-row-btn" onclick="addRow(${ti})">+ 행 추가</button>
+      <div style="font-size:11px;color:var(--mut);margin:10px 0 6px">
+        📊 청약 접수건수/계약 진행 현황 (분양공고 원문에는 없고 진행 중 갱신되는 정보라 직접 입력 - 비워두면 엑셀에도 빈 칸으로 남음)
+      </div>
+      <div class="edit-grid" style="margin-bottom:8px">
+        <div class="edit-field"><label>특별공급 당해</label><input class="edit-in" type="number" id="e-sp-local-${ti}" value="${t.sp_local ?? ''}" oninput="markDirty()"></div>
+        <div class="edit-field"><label>특별공급 기타</label><input class="edit-in" type="number" id="e-sp-other-${ti}" value="${t.sp_other ?? ''}" oninput="markDirty()"></div>
+        <div class="edit-field"><label>1순위 당해</label><input class="edit-in" type="number" id="e-r1-local-${ti}" value="${t.r1_local ?? ''}" oninput="markDirty()"></div>
+        <div class="edit-field"><label>1순위 기타</label><input class="edit-in" type="number" id="e-r1-other-${ti}" value="${t.r1_other ?? ''}" oninput="markDirty()"></div>
+        <div class="edit-field"><label>2순위 당해</label><input class="edit-in" type="number" id="e-r2-local-${ti}" value="${t.r2_local ?? ''}" oninput="markDirty()"></div>
+        <div class="edit-field"><label>2순위 기타</label><input class="edit-in" type="number" id="e-r2-other-${ti}" value="${t.r2_other ?? ''}" oninput="markDirty()"></div>
+      </div>
+      <div class="edit-grid" style="margin-bottom:8px">
+        <div class="edit-field"><label>계약 1일차</label><input class="edit-in" type="number" id="e-cd0-${ti}" value="${t.contract_days?.[0] ?? ''}" oninput="markDirty()"></div>
+        <div class="edit-field"><label>계약 2일차</label><input class="edit-in" type="number" id="e-cd1-${ti}" value="${t.contract_days?.[1] ?? ''}" oninput="markDirty()"></div>
+        <div class="edit-field"><label>계약 3일차</label><input class="edit-in" type="number" id="e-cd2-${ti}" value="${t.contract_days?.[2] ?? ''}" oninput="markDirty()"></div>
+        <div class="edit-field"><label>계약 4일차</label><input class="edit-in" type="number" id="e-cd3-${ti}" value="${t.contract_days?.[3] ?? ''}" oninput="markDirty()"></div>
+        <div class="edit-field"><label>계약 5일차</label><input class="edit-in" type="number" id="e-cd4-${ti}" value="${t.contract_days?.[4] ?? ''}" oninput="markDirty()"></div>
+      </div>
+      <div class="edit-field" style="margin-bottom:8px">
+        <label>비고</label><input class="edit-in" id="e-remark-${ti}" value="${esc(t.remark||'')}" oninput="markDirty()">
+      </div>
+      <div class="edit-field" style="margin-bottom:8px">
+        <label>청약일정등</label><textarea class="edit-in" id="e-sched-${ti}" rows="3" oninput="markDirty()">${esc(t.schedule_note||'')}</textarea>
+      </div>
     </div>`;
   });
   return h;
@@ -1409,6 +1437,15 @@ function saveEdit() {
     t.supply_units   = parseInt(document.getElementById(`e-units-${ti}`)?.value)  || t.supply_units;
     t.balcony_ext_cost = parseInt(document.getElementById(`e-balc-${ti}`)?.value) || 0;
     t.option_cost    = parseInt(document.getElementById(`e-opt-${ti}`)?.value)    || 0;
+
+    // 청약 접수건수/계약 진행 현황 - 빈 칸이면 null(엑셀에도 빈 칸으로 남김), 숫자면 그 값
+    const numOrNull = (id) => { const v = document.getElementById(id)?.value; return v === '' || v == null ? null : parseInt(v); };
+    t.sp_local = numOrNull(`e-sp-local-${ti}`); t.sp_other = numOrNull(`e-sp-other-${ti}`);
+    t.r1_local = numOrNull(`e-r1-local-${ti}`); t.r1_other = numOrNull(`e-r1-other-${ti}`);
+    t.r2_local = numOrNull(`e-r2-local-${ti}`); t.r2_other = numOrNull(`e-r2-other-${ti}`);
+    t.contract_days = [0, 1, 2, 3, 4].map((i) => numOrNull(`e-cd${i}-${ti}`));
+    t.remark = document.getElementById(`e-remark-${ti}`)?.value.trim() || '';
+    t.schedule_note = document.getElementById(`e-sched-${ti}`)?.value.trim() || '';
 
     // 행 데이터 수집
     const tbody = document.getElementById(`e-rows-${ti}`);
@@ -1510,6 +1547,9 @@ const BR_HDR={top:BMED,bottom:BTHIN};
 const BR_TOP_THIN={top:BTHIN};
 const BR_TOPBOT_THIN={top:BTHIN,bottom:BTHIN};
 const BR_GRAND={top:BTHIN,bottom:BMED};
+// 수식 문자열(예: "=SUM(T8:Y8)") 조립 시에만 필요한 열 번호->문자 변환. 셀 자체는
+// ExcelJS의 getCell(row, col) 숫자 접근을 쓰므로 이 변환이 필요 없다.
+function colLetter(n){let s='';while(n>0){n--;s='ABCDEFGHIJKLMNOPQRSTUVWXYZ'[n%26]+s;n=Math.floor(n/26);}return s;}
 function setCell(ws,r,c,v,f,fi,a,nf,bd){
   const cell=ws.getCell(r,c);
   if(v!==undefined&&v!==null){
@@ -1567,6 +1607,23 @@ function buildBlock(ws,unit,startRow){
         // 아파트=공급평수(공급면적 기준), 오피스텔=전용평수(전용면적 기준)
         sc(3,isOfficetel?`=A${r}*0.3025`:`=B${r}*0.3025`,null,null,AC,'#,##0.00',topBd);
         sc(4,t.supply_units,null,null,AC,null,topBd);sc(5,t.code,FB,null,AC,null,topBd);
+        // 청약 접수건수/계약 진행 현황 - 사용자가 수정 탭에서 입력한 값만 채운다(원문에 없는
+        // 정보라 파서가 만들어내지 않으며, 입력 안 한 타입은 헤더만 있고 빈 칸으로 남는다).
+        const subVals=[t.sp_local,t.sp_other,t.r1_local,t.r1_other,t.r2_local,t.r2_other];
+        subVals.forEach((v,i)=>{if(v!=null)sc(20+i,v,null,null,AC,null,topBd);});
+        if(subVals.some(v=>v!=null)){
+          sc(26,`=SUM(${colLetter(20)}${r}:${colLetter(25)}${r})`,null,null,AC,null,topBd);
+          sc(27,`=${colLetter(26)}${r}/D${r}`,null,null,AC,'0.00',topBd);
+        }
+        const cdays=t.contract_days||[];
+        cdays.forEach((v,i)=>{if(v!=null)sc(29+i,v,null,null,AC,null,topBd);});
+        if(cdays.some(v=>v!=null)){
+          sc(34,`=SUM(${colLetter(29)}${r}:${colLetter(33)}${r})`,null,null,AC,null,topBd);
+          sc(35,`=D${r}-${colLetter(34)}${r}`,null,null,AC,null,topBd);
+          sc(36,`=${colLetter(34)}${r}/D${r}`,null,null,AC,'0.00%',topBd);
+        }
+        if(t.remark)sc(28,t.remark,null,null,AL,null,topBd);
+        if(t.schedule_note)sc(37,t.schedule_note,null,null,AL,null,topBd);
       }
       if(row.dong)sc(6,row.dong,null,null,AC,null,topBd);
       sc(7,row.floor,null,null,AC,null,topBd);sc(8,row.units,null,null,AC,null,topBd);
