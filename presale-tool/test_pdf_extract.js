@@ -104,6 +104,69 @@ async function main() {
   check('P15', '84OA 5층 분양가/계약금/잔금 정확히 인식(공급면적표 복구 후 남은 price 섹션이 온전함)',
     !!r84oa && r84oa.price === 630000000 && r84oa.down_payment === 63000000 && r84oa.balance === 189000000);
 
+  // 20차: 사용자가 직접 업로드한 실제 PDF 5건(아파트) - 레터 접미사형/무접미사 관리코드형 혼재,
+  // 부가세 "-"(면제) 표기, 표 중간 사이드노트 삽입, 불릿 없는 대분류 제목 등 이번 라운드에서
+  // 새로 강화한 메커니즘이 실제 PDF 텍스트 추출 경로에서도 그대로 통하는지 확인한다.
+  const pdfPath4 = path.join(__dirname, 'fixtures', 'uiwang_sk_view.pdf');
+  const full4 = await extractFullText(pdfPath4);
+  check('P16', 'PDF 텍스트 추출(의왕역 SK VIEW): 최소 분량 이상 추출됨', full4.length > 10000);
+  const sections4 = parser.splitDocumentSections(full4);
+  check('P17', '공급대상/공급금액 섹션 앵커 발견(의왕역 SK VIEW)', sections4.found.area && sections4.found.price);
+  const area4 = parser.parseAreaSection(sections4.area);
+  const codes4 = area4.map((x) => x.code);
+  check('P18', '공급면적 7개 타입 전부 인식(레터 접미사형 59A~84C + 무접미사 관리코드형 36/45 혼재)',
+    area4.length === 7 && ['36', '45', '59A', '59B', '84A', '84B', '84C'].every((c) => codes4.includes(c)));
+  const price4 = parser.parsePriceSection(sections4.price, codes4);
+  const r36 = price4.priceRows.find((r) => r.code === '36');
+  check('P19', '36 타입 17층 분양가/계약금(부가세 "-" 행 포함 대지비+건축비=합계 산술 검증) 정확히 인식',
+    !!r36 && r36.price === 395000000 && r36.down_payment === 39500000);
+
+  const pdfPath5 = path.join(__dirname, 'fixtures', 'busan_jangan_b2_jungheungs_class.pdf');
+  const full5 = await extractFullText(pdfPath5);
+  check('P20', 'PDF 텍스트 추출(부산 장안지구 B-2블록 중흥S-클래스): 최소 분량 이상 추출됨', full5.length > 10000);
+  const sections5 = parser.splitDocumentSections(full5);
+  check('P21', '공급대상/공급금액 섹션 앵커 발견(부산 장안지구 B-2블록)', sections5.found.area && sections5.found.price);
+  const area5 = parser.parseAreaSection(sections5.area);
+  const codes5 = area5.map((x) => x.code);
+  const price5 = parser.parsePriceSection(sections5.price, codes5);
+  const counts5 = {};
+  price5.priceRows.forEach((r) => { counts5[r.code] = (counts5[r.code] || 0) + 1; });
+  check('P22', '표 중간 "■ 공통사항" 삽입으로 밀려난 59B 후반부/84A/84B 행까지 복구되어 4개 타입 각 5행씩 인식',
+    counts5['59A'] === 5 && counts5['59B'] === 5 && counts5['84A'] === 5 && counts5['84B'] === 5);
+
+  const pdfPath6 = path.join(__dirname, 'fixtures', 'chuncheon_riverview_ipark.pdf');
+  const full6 = await extractFullText(pdfPath6);
+  check('P23', 'PDF 텍스트 추출(춘천 리버뷰 아이파크): 최소 분량 이상 추출됨', full6.length > 10000);
+  const sections6 = parser.splitDocumentSections(full6);
+  const area6 = parser.parseAreaSection(sections6.area);
+  const codes6 = area6.map((x) => x.code);
+  const opt6 = parser.parseOptionSection(sections6.option, codes6);
+  check('P24', '"1) 시스템에어컨 2) 가전 3) 인테리어/기타"로 나뉜 옵션 섹션에서 첫 소제목(시스템에어컨)만 정확히 반영',
+    opt6['59A'] === 3660000 && opt6['84A'] === 5450000);
+
+  const pdfPath7 = path.join(__dirname, 'fixtures', 'osan_heritage_xi_2danji.pdf');
+  const full7 = await extractFullText(pdfPath7);
+  check('P25', 'PDF 텍스트 추출(오산헤리티지자이 2단지): 최소 분량 이상 추출됨', full7.length > 10000);
+  const sections7 = parser.splitDocumentSections(full7);
+  check('P26', '불릿 없이 줄 시작 문구("공급대상 및 면적"/"공급대금 및 납부일정")만으로도 섹션 앵커 발견',
+    sections7.found.area && sections7.found.price);
+  const area7 = parser.parseAreaSection(sections7.area);
+  const codes7 = area7.map((x) => x.code);
+  const bal7 = parser.parseBalconySection(sections7.balcony, codes7);
+  check('P27', '"구분(약식표기) 코드나열" 열-정렬 카탈로그 발코니 확장비 표를 헤더-데이터 위치 대응으로 복구(7개 타입)',
+    bal7['75'] === 17700000 && bal7['166P'] === 40900000);
+
+  const pdfPath8 = path.join(__dirname, 'fixtures', 'osan_heritage_xi_1danji.pdf');
+  const full8 = await extractFullText(pdfPath8);
+  check('P28', 'PDF 텍스트 추출(오산헤리티지자이 1단지): 최소 분량 이상 추출됨', full8.length > 10000);
+  const sections8 = parser.splitDocumentSections(full8);
+  const area8 = parser.parseAreaSection(sections8.area);
+  const codes8 = area8.map((x) => x.code);
+  check('P29', '공급면적 8개 타입 전부 인식(84D 포함)', area8.length === 8 && codes8.includes('84D'));
+  const opt8 = parser.parseOptionSection(sections8.option, codes8);
+  check('P30', '"84B,D"(숫자 접두부 생략 나열)에서 84B/84D 둘 다 정확히 인식',
+    opt8['84B'] === 5960000 && opt8['84D'] === 5960000);
+
   console.log(`[test_pdf_extract.js] ${pass}/${pass + fail} 통과`);
   if (failures.length) {
     console.log('--- 실패 목록 ---');

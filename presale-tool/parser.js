@@ -51,6 +51,28 @@
   var SHORT_CODE_RE = /^\d{2,4}[A-Za-z]{1,3}\d{0,2}(?:-[A-Za-z]{1,3})?$/;
   // 긴 소수형 코드: 059.9700A (문자 접미사 필수 - 없으면 순수 면적값과 구분 불가)
   var LONG_CODE_RE = /^\d{2,3}\.\d{2,4}[A-Za-z]{1,2}$/;
+  // 문자 접미사 없는 긴 소수형 관리코드: 036.9653 (같은 표 안에 59A/84A처럼 레터 접미사가
+  // 붙는 타입과, 36/45처럼 동·호 구분이 필요 없어 접미사가 없는 타입이 함께 나오는 문서 대응).
+  // 형태만으로는 순수 면적값과 구분 불가하므로 findSelfConsistentBareCodeBoundaries에서
+  // "이 값이 몇 토큰 뒤 전용면적 데이터로 그대로 반복 등장하는지"를 검증한 것만 인정한다.
+  var BARE_LONG_CODE_RE = /^\d{2,3}\.\d{2,4}$/;
+
+  // BARE_LONG_CODE_RE에 매칭된 토큰이 실제 "관리코드"(전용면적을 소수점 자릿수만 다르게 그대로
+  // 반복 표기, 예: "036.9653" → 몇 토큰 뒤 "36.9653")인지, 우연히 그 값 그대로인 일반 면적
+  // 데이터값(주거공용/계약면적 등, 값이 서로 겹치지 않는 게 보통)인지를 자기참조 중복으로
+  // 가려낸다. 표 헤더의 코드 나열(공고상 표기 안내 목록)처럼 근처에 반복이 없는 경우는
+  // 자연스럽게 걸러진다.
+  function findSelfConsistentBareCodeBoundaries(tokens) {
+    var out = [];
+    for (var i = 0; i < tokens.length; i++) {
+      if (!BARE_LONG_CODE_RE.test(tokens[i])) continue;
+      var v = Number(tokens[i]);
+      for (var j = i + 1; j < Math.min(tokens.length, i + 6); j++) {
+        if (/^\d+\.\d+$/.test(tokens[j]) && Math.abs(Number(tokens[j]) - v) < 0.0001) { out.push(i); break; }
+      }
+    }
+    return out;
+  }
 
   // 좀더 단순하고 견고한 토크나이저: 탭/2칸 이상 공백을 컬럼 구분자로, 그 외 단일 공백은 유지
   function tokenize(line) {
@@ -237,19 +259,27 @@
     }
     if (floats.length < 2) return null;
 
-    // 코드: 1) 짧은형(84A 등) 2) 긴 소수형(084.9750A 등) 3) 면적값 바로 옆 순수정수(마지막 수단)
-    var code = null;
-    for (var t = 0; t < toks.length; t++) {
-      if (SHORT_CODE_RE.test(toks[t])) { code = toks[t]; break; }
-    }
-    if (!code) {
-      for (var t2 = 0; t2 < toks.length; t2++) {
-        if (LONG_CODE_RE.test(toks[t2])) { code = toks[t2]; break; }
-      }
-    }
     var floatIdxs = floats.map(function (f) { return f.idx; });
     var firstFloatIdx = Math.min.apply(null, floatIdxs);
     var maxFloatIdx = Math.max.apply(null, floatIdxs);
+
+    // 코드: 1) 짧은형(84A 등) 2) 긴 소수형(084.9750A 등) 3) 면적값 바로 옆 순수정수(마지막 수단)
+    // 탐색 범위를 세그먼트 맨 앞(첫 면적값 전후)으로 한정한다 - 세그먼트 경계가 "약식표기(짧은형)
+    // 코드" 자체로 잡혀 있으면, 바로 그 앞 토큰인 같은 행의 "긴 소수형" 코드가 이전 세그먼트의
+    // 꼬리로 밀려들어간다(예: "...45 45.9344... 059.8216A | 59A 59.8216..." - 앞 세그먼트 끝에
+    // 다음 행의 "059.8216A"가 붙음). 세그먼트 전체를 뒤져 코드를 찾으면 이 꼬리 오염이 실제
+    // 코드보다 먼저 매치되어 엉뚱한 코드로 뒤바뀔 수 있으므로, 코드는 항상 데이터 값(면적) 바로
+    // 앞/뒤에 붙어 있다는 구조적 전제 하에 탐색 범위를 좁힌다.
+    var codeSearchEnd = Math.min(toks.length, firstFloatIdx + 2);
+    var code = null;
+    for (var t = 0; t < codeSearchEnd; t++) {
+      if (SHORT_CODE_RE.test(toks[t])) { code = toks[t]; break; }
+    }
+    if (!code) {
+      for (var t2 = 0; t2 < codeSearchEnd; t2++) {
+        if (LONG_CODE_RE.test(toks[t2])) { code = toks[t2]; break; }
+      }
+    }
     if (!code) {
       var adj = [toks[firstFloatIdx - 1], toks[firstFloatIdx + 1]].filter(Boolean);
       for (var ai = 0; ai < adj.length; ai++) {
@@ -303,6 +333,13 @@
     if (!boundaries.length) {
       for (var i2 = 0; i2 < tokens.length; i2++) if (LONG_CODE_RE.test(tokens[i2])) boundaries.push(i2);
     }
+    // 레터 접미사형(59A 등)과 무접미사 관리코드형(036.9653 등)이 한 표 안에 섞여 있는 문서 대응:
+    // 자기참조 검증을 통과한 무접미사 경계도 추가로 합친다(둘 다 없거나 둘 다 있어도 안전).
+    var bareBoundaries = findSelfConsistentBareCodeBoundaries(tokens);
+    if (bareBoundaries.length) {
+      bareBoundaries.forEach(function (idx) { if (boundaries.indexOf(idx) === -1) boundaries.push(idx); });
+      boundaries.sort(function (a, b) { return a - b; });
+    }
     if (!boundaries.length) {
       // 짧은형/긴형 코드가 전혀 없는 경우(순수 숫자 코드형): 줄 단위로 폴백해
       // extractAreaFromTokens의 "면적값 인접 순수정수" 최후수단 규칙에 맡긴다.
@@ -328,6 +365,16 @@
         (/^계$/.test(tokens[ti]) && ti > lastBoundary && tokens[ti + 1] && /^\d+$/.test(tokens[ti + 1]));
       if (isTotalRow) { totalIdx = ti; break; }
     }
+
+    // "합계" 행 뒤에 "주택형 표시 안내"/"특별공급 공급세대수"처럼 코드가 다시 요약·나열되는
+    // 부가 표가 이어지는 문서가 있다(실사례: 부산 장안지구 B-2블록 중흥S-클래스). 이런
+    // 부가 표의 코드 언급이 boundaries에 섞여 있으면, 마지막 실제 주택형의 세그먼트가
+    // "다음 경계"를 그 부가 표 쪽 코드로 잘못 잡아 합계 행까지(그리고 그 사이 부가 표 일부까지)
+    // 통째로 삼켜버린다. 합계 행 이후에 나오는 경계는 전부 부가 표에서 온 것이므로 제거한다.
+    if (totalIdx < tokens.length) {
+      boundaries = boundaries.filter(function (b) { return b < totalIdx; });
+    }
+    if (!boundaries.length) return [];
 
     var out = [];
     for (var b = 0; b < boundaries.length; b++) {
@@ -462,7 +509,7 @@
       else if (tokens[p] && isLabelToken(tokens[p]) && isMoneyToken(tokens[p + 1])) p++;
       var run = [];
       var j = p;
-      while (j < tokens.length && isMoneyToken(tokens[j])) { run.push(toNum(tokens[j])); j++; }
+      while (j < tokens.length && isMoneyOrZeroToken(tokens[j])) { run.push(moneyOrZeroValue(tokens[j])); j++; }
       if (run.length < 4) continue;
       var candidates = [4, 3];
       var matched = false;
@@ -584,6 +631,15 @@
   function isDongToken(tok) {
     return /^\d/.test(tok) && /(동|호)/.test(tok) && !/층/.test(tok);
   }
+  // 동/호 목록이 "113동 3, 4, 5호"처럼 쉼표로 나열되며 여러 토큰으로 쪼개진 경우, 중간의
+  // "3," "4," 같은 조각은 그 자체로는 isDongToken이 아니다(동/호 글자가 없음). 이런 조각도
+  // 직전 토큰이 동/호 목록의 일부였을 때만(호출측에서 lastDongIdx로 판단) 이어붙일 수 있도록,
+  // "숫자/쉼표/가운뎃점/슬래시로만 이루어지고 쉼표·동·호로 끝나는" 형태적 특징만으로 판별한다
+  // (실제 값이 아니라 표기 형태로 구분 - 세대수 같은 독립된 숫자는 쉼표로 끝나지 않는다).
+  function isDongContinuationToken(tok) {
+    if (!/[,·/동호]$/.test(tok)) return false;
+    return /^[\d,·/]+(동|호)?$/.test(tok);
+  }
   function isFloorToken(tok) {
     // 콤마 구분 금액("60,857" 등)은 층 목록("5,7,9")과 형태가 겹치므로 먼저 배제한다.
     if (isMoneyToken(tok)) return false;
@@ -602,6 +658,16 @@
   }
   function isMoneyToken(tok) {
     return /^\d[\d,]*$/.test(tok) && tok.replace(/,/g, '').length >= 4;
+  }
+  // "-" 한 글자는 "해당 항목 없음(0원)"을 뜻하는 표기 관례(예: 부가세 면제 주택의 부가가치세
+  // 칸). 금액 나열이 이 자리에서 끊기면 대지비+건축비+(부가세)=합계 같은 행 전체의 산술
+  // 일관성 검증이 실패해 컬럼 구조를 아예 못 찾게 되므로, 금액 자리에서만 값 0으로 취급한다
+  // (isFloorToken/isLabelToken 등 다른 판별에는 영향 없음 - "-"는 그쪽 정규식에 매칭되지 않음).
+  function isMoneyOrZeroToken(tok) {
+    return isMoneyToken(tok) || tok === '-';
+  }
+  function moneyOrZeroValue(tok) {
+    return tok === '-' ? 0 : toNum(tok);
   }
   // 층 토큰(및 이어지는 연속 토큰) 다음 위치에서, 세대수(선택)나 서브옵션 라벨(선택)을
   // 건너뛰고 금액 데이터가 시작되는 인덱스를 반환한다. 세대수도 라벨도 없이 곧장
@@ -627,18 +693,18 @@
     var units = null, label = null, sliceStart = p;
     if (tokens[p] && /^\d{1,3}$/.test(tokens[p])) {
       var s1 = tokens.slice(p + 1, p + 1 + colMap.length);
-      if (s1.length === colMap.length && s1.every(isMoneyToken)) { units = Number(tokens[p]); sliceStart = p + 1; }
+      if (s1.length === colMap.length && s1.every(isMoneyOrZeroToken)) { units = Number(tokens[p]); sliceStart = p + 1; }
     }
     if (units === null && tokens[p] && isLabelToken(tokens[p])) {
       var s2 = tokens.slice(p + 1, p + 1 + colMap.length);
-      if (s2.length === colMap.length && s2.every(isMoneyToken)) { label = tokens[p]; sliceStart = p + 1; }
+      if (s2.length === colMap.length && s2.every(isMoneyOrZeroToken)) { label = tokens[p]; sliceStart = p + 1; }
     }
     var slice = tokens.slice(sliceStart, sliceStart + colMap.length);
-    if (slice.length !== colMap.length || !slice.every(isMoneyToken)) return null;
+    if (slice.length !== colMap.length || !slice.every(isMoneyOrZeroToken)) return null;
 
     var values = { mid: [] };
     colMap.forEach(function (kind, ci) {
-      var v = toNum(slice[ci]) * unit_mult;
+      var v = moneyOrZeroValue(slice[ci]) * unit_mult;
       if (kind === 'mid') values.mid.push(v);
       else if (kind === 'down') values.down = (values.down || 0) + v;
       else if (kind === 'balance') values.balance = (values.balance || 0) + v;
@@ -685,7 +751,7 @@
       var isCode = codeSet ? (codeSet.indexOf(tok) !== -1) : (SHORT_CODE_RE.test(tok) || LONG_CODE_RE.test(tok));
       if (isCode) { currentCode = tok; currentDong = ''; currentFloorRaw = null; lastDongIdx = -1; i++; continue; }
 
-      if (isDongToken(tok)) {
+      if (isDongToken(tok) || (lastDongIdx === i - 1 && isDongContinuationToken(tok))) {
         currentDong = (lastDongIdx === i - 1) ? (currentDong + ' ' + tok) : tok;
         lastDongIdx = i;
         i++; continue;
@@ -838,7 +904,16 @@
       var codesHere = [];
       if (codeSet) {
         tok.split(/[,，·/]/).filter(Boolean).forEach(function (p) {
-          if (codeSet.indexOf(p) !== -1) codesHere.push(p);
+          if (codeSet.indexOf(p) !== -1) { codesHere.push(p); return; }
+          // "84B,D"처럼 같은 숫자 접두부를 공유하는 코드를 나열할 때 뒤쪽 코드의 숫자
+          // 접두부를 생략하는 표기(실사례: 오산헤리티지자이 1단지 "84B,D") 대응: 바로
+          // 앞에서 매치된 코드의 숫자 접두부를 이 조각 앞에 붙여서도 확인해본다.
+          var lastMatched = codesHere.length ? codesHere[codesHere.length - 1] : null;
+          var prefixMatch = lastMatched && lastMatched.match(/^\d+/);
+          if (prefixMatch) {
+            var combined = prefixMatch[0] + p;
+            if (codeSet.indexOf(combined) !== -1) codesHere.push(combined);
+          }
         });
       } else if (SHORT_CODE_RE.test(tok) || LONG_CODE_RE.test(tok)) {
         codesHere = [tok];
@@ -867,11 +942,125 @@
     return groups;
   }
 
+  // "구분 84A 84B ... 비고"처럼 헤더 행 자체에 타입 코드가 여러 개 나열되는 표는, 품목(행)마다
+  // 타입별 금액이 열로 나열되는 카탈로그형(다항목·타입별 열거) 구조다(실사례: 의왕역 SK VIEW
+  // "평면 특화"/"공간 특화"/"마감 특화" 표 - "구분 45 59A 59B 84A 84A(수납강화형 주방) 84B 84C
+  // 비고" 헤더 아래 "①스마트 언박싱 현관 2,100,000 1,800,000 -"처럼 한 품목이 타입마다 다른
+  // 금액을 갖는다). "코드 하나에 값 하나(또는 순서대로 이어지는 몇 개의 안)"라는
+  // scanAmountGroups의 전제와 근본적으로 다른 표라 이 방식으로는 신뢰성 있게 해석할 수 없고,
+  // 잘못 해석하면 같은 옵션 섹션 안의 다른 정상 표(코드별로 한 줄씩 나오는 표) 결과까지
+  // 오염시킨다(실측: 모든 타입이 표 안 어딘가의 최솟값 하나로 뭉개짐). "구분"으로 시작해 근처에
+  // codeSet 멤버가 2개 이상 나오고 "비고"로 끝나는 헤더가 나오면, 그 블록은(다음 "■"/"▣" 헤딩
+  // 또는 다음 "구분...비고" 헤더 직전까지) 통째로 스캔 대상에서 제외한다 - 그 블록만큼은
+  // 옵션가를 인식하지 못하고 명시적으로 비워두는 것이, 다른 정상 표까지 끌고 들어가 엉뚱한
+  // 금액을 만드는 것보다 안전하다.
+  // 카탈로그형 표 블록의 끝은 findNextHeadingBoundary(다음 "■" 하나)로 단순히 정하면 안 된다
+  // - 이 표들은 내부에 "■공간특화 ②미니멀 주방 동시선택 불가"처럼 다른 품목을 참조하는
+  // 각주성 인라인 불릿을 흔히 포함하고, 품목 카테고리(평면특화/공간특화/마감특화/가전시스템
+  // 특화 등)마다 또 자기 이름의 "■" 헤딩을 갖기 때문에 첫 인라인 불릿에서 멈추면 표의
+  // 극히 일부만 걷어내고 나머지는 그대로 남긴다. 실제 표가 다 끝나는 지점은 예외 없이
+  // "납부일정/납부계좌/유의사항"류 안내 헤딩이므로, findSectionEndHeading과 같은 기준으로
+  // (그 사이의 다른 모든 "■"는 카탈로그 항목 전환이든 각주 참조든 건너뛰고) 찾는다.
+  // 카탈로그형 헤더는 "구분 84A 84B 비고"처럼 "비고"로 끝나는 경우도 있지만, "구분(약식표기)
+  // 75 84A 84B 84C 102 124 166P"처럼 "비고" 없이 코드 나열로 그냥 끝나는 경우도 있다(실사례:
+  // 오산헤리티지자이 1/2단지 발코니 확장 표 - "구분" 한 줄 안에 타입 코드가 열 헤더로 전부
+  // 나열되고, 그 아래 "발코니 확장 금액/계약금/중도금/잔금" 각 행이 코드별 값을 옆으로
+  // 나열한다). "비고"라는 특정 단어보다, "구분으로 시작하는 한 줄 안에 codeSet 멤버가 2개
+  // 이상 등장하는지"라는 형태적 특징만으로 판별한다.
+  function stripCatalogTables(text, codeSet) {
+    if (!codeSet || !codeSet.length) return text;
+    var HEADER_LINE_RE = /^[ \t]*구분[^\n]*/gm;
+    var cuts = [];
+    var m;
+    while ((m = HEADER_LINE_RE.exec(text))) {
+      var headerStart = m.index;
+      var hit = codeSet.filter(function (c) { return m[0].indexOf(c) !== -1; });
+      if (hit.length < 2) continue;
+      var blockEnd = findSectionEndHeading(text, headerStart);
+      if (blockEnd < 0) blockEnd = text.length;
+      cuts.push({ start: headerStart, end: blockEnd });
+      HEADER_LINE_RE.lastIndex = blockEnd;
+    }
+    if (!cuts.length) return text;
+    var result = text;
+    cuts.sort(function (a, b) { return b.start - a.start; });
+    cuts.forEach(function (c) { result = result.slice(0, c.start) + '\n' + result.slice(c.end); });
+    return result;
+  }
+
+  // "1) 시스템에어컨 ... 2) 가전 ... 3) 인테리어/기타 ..."처럼 항목 대분류가 번호 매김
+  // 소제목으로 나뉘는 문서가 있다(실사례: 춘천 리버뷰 아이파크). 각 소제목마다 완전히
+  // 다른 품목(에어컨/냉장고/오븐/욕실/조명 등)의 가격이 나오는데, "코드당 최솟값 하나"라는
+  // scanAmountGroups의 전제로는 이 여러 품목을 구분할 수 없어 전혀 다른 품목의 최저가가
+  // 섞여 나온다(실측: 84A 옵션가로 "시스템에어컨" 대신 "오븐" 최저가가 잡힘). 어느 품목이
+  // "그" 옵션가인지 판단할 근거가 없으므로, 발코니 확장비처럼 이미 하나의 표로 정리된
+  // 문서와 달리 첫 번째 소제목(보통 시스템에어컨 등 대표 품목)만 남기고 나머지는 통째로
+  // 포기한다 - 여러 품목의 최저가가 뒤섞인 값보다는, 첫 품목만 정확히 반영하는 쪽이 안전하다.
+  function restrictToFirstNumberedSubsection(text) {
+    var re = /^\d\)\s*\S/gm;
+    var idx = [];
+    var m;
+    while ((m = re.exec(text))) idx.push(m.index);
+    if (idx.length < 2) return text;
+    return text.slice(0, idx[1]);
+  }
+
+  // "N) 제목"처럼 번호가 없어도, "천장형 시스템에어컨 ... (단위 : 원, 부가가치세 포함)" /
+  // "시스템 공기청정기 ... (단위 : 원, 부가가치세 포함)" / "주방가전 옵션 ... (단위 : 원,
+  // 부가가치세 포함)"처럼 품목 대분류 제목이 전부 "(단위 : ...)" 표기로 끝나는 줄로 구분되는
+  // 문서도 있다(실사례: 오산헤리티지자이 1/2단지 "12 유상옵션" 아래 천장형 시스템에어컨/
+  // 시스템 공기청정기/주방가전 옵션). restrictToFirstNumberedSubsection과 같은 이유로, 이런
+  // 줄이 2개 이상 나오면 첫 품목만 남기고 나머지는 포기한다.
+  function restrictToFirstUnitMarkerSubsection(text) {
+    var re = /^.{0,80}[(（]\s*단위\s*[:：][^)）]*[)）]\s*$/gm;
+    var idx = [];
+    var m;
+    while ((m = re.exec(text))) idx.push(m.index);
+    if (idx.length < 2) return text;
+    return text.slice(0, idx[1]);
+  }
+
+  // stripCatalogTables가 걷어낸 카탈로그형 표가, 실제로는 코드마다 값 하나씩만 있는 단순한
+  // 열-정렬 표일 수도 있다(실사례: 오산헤리티지자이 1/2단지 발코니 확장비 - "구분(약식표기)
+  // 75 84A 84B 84C 102 124 166P" 헤더 한 줄 다음에 "발코니 확장 금액 17,700,000 19,900,000
+  // ..."처럼 헤더의 코드 순서 그대로 금액이 나열된다). 이런 경우 헤더 줄의 코드 등장 순서와
+  // 그 직후 데이터 줄의 금액 개수가 정확히 일치하는지(=산술적으로 1:1 대응이 명백한지)를
+  // 검증해, 맞을 때만 코드별 값으로 복구한다. 옵션처럼 여러 품목이 뒤섞인 카탈로그(우열을
+  // 가릴 수 없는 다항목 표)에서는 이 복구를 시도하지 않는다 - 발코니 확장비처럼 "그 표가
+  // 이 섹션의 유일한 내용"일 때만(=다른 정상 경로로 이미 값을 찾은 코드가 하나도 없을 때만)
+  // 폴백으로 사용한다.
+  function extractColumnAlignedCandidates(text, codeSet) {
+    if (!codeSet || !codeSet.length) return {};
+    var lines = text.split(/\n/);
+    var out = {};
+    for (var i = 0; i < lines.length; i++) {
+      var headerLine = lines[i].trim();
+      if (!/^구분/.test(headerLine)) continue;
+      var headerCodes = [];
+      headerLine.split(/\s+/).forEach(function (p) { if (codeSet.indexOf(p) !== -1) headerCodes.push(p); });
+      if (headerCodes.length < 2) continue;
+      for (var j = i + 1; j < Math.min(lines.length, i + 6); j++) {
+        var dtoks = lines[j].trim().split(/\s+/).filter(Boolean);
+        var moneyToks = dtoks.filter(isMoneyToken);
+        if (moneyToks.length === headerCodes.length) {
+          headerCodes.forEach(function (c, idx) {
+            out[c] = (out[c] || []).concat([toNum(moneyToks[idx])]);
+          });
+          break;
+        }
+      }
+    }
+    return out;
+  }
+
   function parseAmountByCodeSection(text, codes) {
     text = fixGluedNumbers(despaceKeywords(String(text || '')));
+    text = restrictToFirstNumberedSubsection(text);
+    text = restrictToFirstUnitMarkerSubsection(text);
     var unit_mult = detectUnitMult(headerText(text));
     var codeSet = codes && codes.length ? codes.slice() : null;
-    var tokens = text.split(/\s+/).filter(Boolean);
+    var strippedText = stripCatalogTables(text, codeSet);
+    var tokens = strippedText.split(/\s+/).filter(Boolean);
     var groups = scanAmountGroups(tokens, codeSet);
 
     var candidates = {};
@@ -881,6 +1070,13 @@
         candidates[c] = (candidates[c] || []).concat([g.firstMoney]);
       });
     });
+
+    if (!Object.keys(candidates).length) {
+      var columnCandidates = extractColumnAlignedCandidates(text, codeSet);
+      Object.keys(columnCandidates).forEach(function (c) {
+        candidates[c] = (candidates[c] || []).concat(columnCandidates[c]);
+      });
+    }
 
     var result = {};
     Object.keys(candidates).forEach(function (c) {
@@ -906,7 +1102,10 @@
     var move_in_year = null;
     var move_in_month = null;
 
-    var openM = text.match(/(?:입주자\s*모집\s*)?공고일\s*[:：]?\s*([0-9.\-/년월일\s]{6,20})/);
+    // "공고일:" 처럼 곧바로 값이 오는 경우뿐 아니라 "공고일은 2026.07.10.입니다"처럼 한글
+    // 조사(은/는/이/가)가 라벨과 값 사이에 끼는 서술형 문장도 지원한다(실사례: 부산 장안지구
+    // B-2블록 - "본청약 입주자모집공고일은 2026.07.10.입니다.").
+    var openM = text.match(/(?:입주자\s*모집\s*)?공고일\s*(?:은|는|이|가)?\s*[:：]?\s*([0-9.\-/년월일\s]{6,20})/);
     if (openM) open_date = parseFlexDate(openM[1]);
     if (!open_date) {
       // "...-12156호(2024.02.28.)로 입주자모집공고 승인" 처럼 승인/신고 문구 앞의 날짜로 공고일을 대신 표기하는 경우
@@ -936,9 +1135,14 @@
   // 대체할 수 있게 해야 한다.
   // ---------------------------------------------------------------------
 
+  // 대부분의 실사례는 "■"/"▣" 불릿 뒤에 섹션 제목이 오지만, 대분류 번호("3 공급내역 및
+  // 공급금액")만 붙고 그 하위의 "공급대상 및 면적"/"공급대금 및 납부일정" 제목 자체에는
+  // 불릿이 전혀 없는 문서도 있다(실사례: 오산헤리티지자이 1/2단지). 이런 경우까지 대응하기
+  // 위해 불릿 없이 줄 시작(^)에서 바로 매칭하는 패턴을 함께 둔다 - 문구가 아주 구체적이라
+  // (표 제목 전체 문구) 본문 산문 중간에서 우연히 줄 시작과 일치할 위험은 낮다.
   var SECTION_ANCHORS = {
-    area: [/[■▣]\s*공급대상\s*(?:및\s*공급규모)?(?!물)/],
-    price: [/[■▣]\s*공급금액\s*및\s*납부일정/, /[■▣]\s*분양가격\s*납부조건\s*등?\s*안내/, /[■▣]\s*공급금액\s*납부조건\s*등?\s*안내/],
+    area: [/[■▣]\s*공급대상\s*(?:및\s*공급규모)?(?!물)/, /^\s*공급대상\s*및\s*면적/m],
+    price: [/[■▣]\s*공급금액\s*및\s*납부일정/, /[■▣]\s*분양가격\s*납부조건\s*등?\s*안내/, /[■▣]\s*공급금액\s*납부조건\s*등?\s*안내/, /^\s*공급대금\s*및\s*납부일정/m],
     balcony: [/[■▣]\s*발코니\s*확장/],
     option: [/[■▣]\s*추가\s*선택\s*옵션품목/, /[■▣]\s*추가선택\s*옵션품목/, /[■▣]\s*옵션품목/, /[■▣]\s*별도계약\s*[-–]\s*추가\s*선택품목/, /[■▣]\s*추가\s*선택품목/]
   };
@@ -982,23 +1186,119 @@
     return best;
   }
 
-  function sliceSection(text, start, endCandidates) {
-    if (start < 0) return '';
+  function computeSectionEnd(text, start, endCandidates) {
     var end = text.length;
     for (var i = 0; i < endCandidates.length; i++) {
       var c = endCandidates[i];
       if (c >= 0 && c > start && c < end) end = c;
     }
+    return end;
+  }
+
+  function sliceSection(text, start, endCandidates) {
+    if (start < 0) return '';
+    var end = computeSectionEnd(text, start, endCandidates);
     return text.slice(start, end).trim();
+  }
+
+  // 표 중간에 페이지 여백의 사이드 노트(예: "■ 공통사항" 안내문)가 pdf.js 재구성 순서상
+  // 끼어들어, 같은 표의 뒷부분(일부 타입의 행)이 그 안내문 뒤로 밀려나는 문서가 있다
+  // (실사례: 부산 장안지구 B-2블록 중흥S-클래스 - 59B 후반부/84A/84B 행이 "■ 공통사항"
+  // 뒤로 밀림). 헤더 문구가 아니라 "area 섹션에서 이미 확인된 타입 코드 중 price 섹션에
+  // 하나도 안 잡힌 코드가 있는지"(=표가 잘렸는지)로 판단하고, 있다면 그 코드가 실제로
+  // 다시 등장하는 뒷부분을 찾아 이어붙인다. 이어붙인 결과가 실제로 그 코드를 더 찾아내는
+  // 경우에만(=parsePriceSection 자체로 개선 여부를 검증) 채택한다 - 실패하면 조용히
+  // 포기하고 원래(더 짧은) price를 그대로 둔다.
+  // boundIdx: 이 경계(다음 진짜 섹션의 시작 등)를 넘어서까지 이어붙이지 않는다 - 그렇지
+  // 않으면 "이 섹션엔 원래 없는 코드"(예: 발코니 확장 대상에서 제외된 타입)를 뒤이어 오는
+  // 완전히 다른 섹션(옵션 등)에서 잘못 주워오게 된다(실사례로 확인: 의왕역 SK VIEW -
+  // 발코니 확장 대상에서 제외된 "36" 타입을 찾으려다 옵션 섹션의 "36" 옵션가를 발코니
+  // 확장비로 오인).
+  function repairFragmentedPriceTable(fullText, priceText, priceEndIdx, areaCodes, boundIdx) {
+    if (!areaCodes || !areaCodes.length || priceEndIdx < 0 || priceEndIdx >= fullText.length) return null;
+    var before = parsePriceSection(priceText, areaCodes).priceRows;
+    var seenBefore = {};
+    before.forEach(function (r) { seenBefore[r.code] = true; });
+    if (areaCodes.every(function (c) { return seenBefore[c]; })) return null; // 이미 모든 코드가 있으면 손대지 않는다
+
+    var searchEnd = (boundIdx != null && boundIdx >= 0) ? boundIdx : fullText.length;
+    if (searchEnd <= priceEndIdx) return null;
+
+    // 끊긴 지점 바로 다음이 "새 코드"로 시작한다는 보장이 없다(직전 코드의 나머지 층
+    // 행일 수도 있음 - 실사례: 부산 장안지구 59B의 3/4층·기준층). 그래서 코드가 아니라
+    // "표가 다시 시작되는 지점"을 층 행 패턴(층 표기 바로 뒤에 숫자가 오는 줄 시작)으로 찾는다.
+    var RESUME_RE = /^[ \t]*(\d+(?:~\d+)?[ \t]*층|기준층)[ \t]+\d/m;
+    var searchText = fullText.slice(priceEndIdx, searchEnd);
+    var m = searchText.match(RESUME_RE);
+    if (!m || m.index == null) return null;
+    var resumeIdx = priceEndIdx + m.index;
+
+    var resumeEnd = findNextHeadingBoundary(fullText, resumeIdx);
+    if (resumeEnd < 0 || resumeEnd > searchEnd) resumeEnd = searchEnd;
+    var continuation = fullText.slice(resumeIdx, resumeEnd).trim();
+    if (!continuation) return null;
+
+    var merged = (priceText + '\n' + continuation).trim();
+    var after = parsePriceSection(merged, areaCodes).priceRows;
+    if (after.length <= before.length) return null; // 개선이 없으면 포기(명시적 실패 유지)
+    var seenAfter = {};
+    after.forEach(function (r) { seenAfter[r.code] = true; });
+    var beforeMissing = areaCodes.filter(function (c) { return !seenBefore[c]; }).length;
+    var afterMissing = areaCodes.filter(function (c) { return !seenAfter[c]; }).length;
+    if (afterMissing > beforeMissing) return null; // 코드 커버리지가 오히려 나빠지면 포기
+    return merged;
+  }
+
+  // 발코니/옵션 섹션도 price와 같은 "표 제목 헤딩 바로 뒤에 사이드 노트(납부계좌 안내 등)가
+  // pdf.js 재구성 순서상 끼어들고, 진짜 데이터 표는 그 뒤 긴 유의사항 산문을 지나서야
+  // 나오는" 문제를 겪을 수 있다(실사례: 부산 장안지구 B-2블록 - "발코니 확장 공사비 및
+  // 납부일정" 헤딩 직후 "발코니확장 납부계좌" 안내문이 먼저 나오고, 실제 타입별 금액 표는
+  // 그보다 한참 뒤에 "구분 발코니 확장 공사비 계약금 중도금 잔금" 헤더로 다시 나온다).
+  // area 코드 중 하나도 못 찾았을 때만(=표를 통째로 놓쳤다고 판단될 때만) 시도하고, 코드가
+  // 줄 시작에서 다시 등장하는 지점을 찾아 이어붙인 뒤 실제로 더 많은 코드를 찾아낼 때만 채택한다.
+  // boundIdx: repairFragmentedPriceTable과 동일한 이유로, 이 섹션에 원래 없는 코드를
+  // 뒤이어 오는 다른 섹션에서 잘못 끌어오지 않도록 탐색 범위를 그 다음 진짜 섹션 시작
+  // 직전까지로 제한한다.
+  function repairFragmentedAmountSection(fullText, sectionText, sectionEndIdx, areaCodes, boundIdx) {
+    if (!areaCodes || !areaCodes.length || sectionEndIdx < 0 || sectionEndIdx >= fullText.length) return null;
+    var before = parseAmountByCodeSection(sectionText, areaCodes);
+    var missing = areaCodes.filter(function (c) { return !(c in before); });
+    if (!missing.length) return null; // 이미 모든 코드가 있으면 손대지 않는다
+
+    var searchEnd = (boundIdx != null && boundIdx >= 0) ? boundIdx : fullText.length;
+    if (searchEnd <= sectionEndIdx) return null;
+
+    // 아직 못 찾은 코드가 줄 시작에서 다시 등장하는(=표가 재개되는) 첫 지점을 찾는다.
+    var searchText = fullText.slice(sectionEndIdx, searchEnd);
+    var resumeIdx = -1;
+    missing.forEach(function (code) {
+      var re = new RegExp('(^|\\n)[ \\t]*' + code.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?=\\s|\\n)');
+      var m = searchText.match(re);
+      if (m && m.index != null) {
+        var idx = sectionEndIdx + m.index + (m[0].length - code.length);
+        if (resumeIdx === -1 || idx < resumeIdx) resumeIdx = idx;
+      }
+    });
+    if (resumeIdx < 0) return null;
+
+    var resumeEnd = findNextHeadingBoundary(fullText, resumeIdx);
+    if (resumeEnd < 0 || resumeEnd > searchEnd) resumeEnd = searchEnd;
+    var continuation = fullText.slice(resumeIdx, resumeEnd).trim();
+    if (!continuation) return null;
+
+    var merged = (sectionText + '\n' + continuation).trim();
+    var after = parseAmountByCodeSection(merged, areaCodes);
+    var stillMissing = areaCodes.filter(function (c) { return !(c in after); });
+    if (stillMissing.length >= missing.length) return null; // 개선이 없으면 포기(명시적 실패 유지)
+    return merged;
   }
 
   // 발코니/옵션 섹션은 문서 마지막 쪽이라 그 뒤에 "다음 대분류 제목"(NEXT_MAJOR_SECTION_RE)이
   // 없는 실제 문서가 많다. 이 경우 표 본문 뒤에 이어지는 긴 유의사항 산문까지 통째로
   // 섹션에 포함되는데, 그 산문 속에 우연히 타입 코드가 언급되면(예: "84A,B,C,D,E타입은
   // 소방 기준에 따라...") parseAmountByCodeSection이 이를 진짜 가격 행으로 오인해 엉뚱한
-  // 금액을 집어온다(실사례로 확인). "■"/"▣"는 실제 표 항목 각주(Ÿ/⦁/•)와 달리 예외 없이
-  // 새 대분류 제목에만 쓰이므로, 자기 자신의 제목 다음에 나오는 첫 "■"/"▣"를 안전한
-  // 종료 경계로 추가한다.
+  // 금액을 집어온다(실사례로 확인). "■"/"▣"는 대부분 새 대분류 제목에 쓰이므로, 자기
+  // 자신의 제목 다음에 나오는 첫 "■"/"▣"를 안전한 종료 경계로 쓴다.
   function findNextHeadingBoundary(text, afterIndex) {
     if (afterIndex < 0) return -1;
     var idx1 = text.indexOf('■', afterIndex + 1);
@@ -1006,6 +1306,45 @@
     if (idx1 === -1) return idx2;
     if (idx2 === -1) return idx1;
     return Math.min(idx1, idx2);
+  }
+
+  // 다만 옵션(추가선택품목) 섹션은 에어컨/평면특화/공간특화/마감특화처럼 여러 항목별로 각자
+  // 자기 이름의 "■ 항목명 [단위 : 원...]" 표 헤딩을 따로 갖는 문서가 있고(실사례: 의왕역
+  // SK VIEW), 그 표 안에는 다른 항목을 참조하는 "■카테고리 ②...동시선택 불가" 같은 각주성
+  // 인라인 불릿까지 섞여 나온다. 이런 문서에서 findNextHeadingBoundary처럼 "다음 ■ 하나"만
+  // 보고 멈추면 첫 항목 표만 남기고 나머지 항목들을 통째로 잘라먹는다. 반대로 실제 표가 다
+  // 끝나는 지점은 예외 없이 "납부일정/납부계좌/납부방법/유의사항/안내사항"류의 정산·안내성
+  // 헤딩이므로, 그 키워드가 나올 때까지는(표 항목 전환이든 표 안 각주 참조든 상관없이) 계속
+  // 다음 "■"/"▣"로 건너뛰며 스캔한다.
+  // "납부일정"은 표 자체의 제목에도 흔히 쓰인다(예: "공급금액 및 납부일정", "발코니 확장
+  // 공사비 및 납부일정" - 실사례: 부산 장안지구. 여기서 종료 경계로 오인하면 진짜 데이터
+  // 표 헤딩 바로 다음에서 멈춰버려 표 내용이 통째로 잘린다). 반면 "납부계좌"/"납부방법"/
+  // "유의사항"/"안내사항"은 결제 계좌·주의사항 안내문 특유의 표현으로, 표 자체의 제목으로
+  // 쓰이는 사례가 없어 종료 경계로 써도 안전하다.
+  var ADMIN_ENDING_HEADING_RE = /납부\s*(계좌|방법)|유의\s*사항|안내\s*사항/;
+  function findSectionEndHeading(text, afterIndex) {
+    var idx = afterIndex;
+    while (true) {
+      var next = findNextHeadingBoundary(text, idx);
+      if (next < 0) return -1;
+      var headingLine = text.slice(next, next + 60).split('\n')[0];
+      if (ADMIN_ENDING_HEADING_RE.test(headingLine)) return next;
+      idx = next;
+    }
+  }
+
+  // 옵션 섹션 대분류 제목이 불릿 없이 "8 추가 선택품목(유상옵션)"처럼 번호만 붙어 나오고,
+  // 실제 표는 그 아래 하위 항목(에어컨/평면특화 등, 문서마다 이름이 다름)의 "■" 헤딩에서
+  // 시작하는 문서 대응: "줄 시작 + 숫자 + 옵션 관련 키워드" 자체는 앵커로 쓰지 않고(그
+  // 문구가 본문 여러 곳에 산문으로도 등장해 오탐이 많다), 그 번호 헤딩 바로 다음에 오는
+  // 첫 "■"/"▣"(=실제 첫 항목 표 헤딩) 위치만 후보로 취한다.
+  var CHAPTER_NUMBER_OPTION_RE = /^\d{1,2}\s*(추가\s*선택\s*옵션품목|추가선택\s*옵션품목|옵션품목|추가\s*선택\s*품목)/m;
+  function findChapterFirstHeading(text, chapterRe, fromIndex) {
+    var sub = text.slice(fromIndex || 0);
+    var m = sub.match(chapterRe);
+    if (!m || m.index == null) return -1;
+    var chapterIdx = (fromIndex || 0) + m.index;
+    return findNextHeadingBoundary(text, chapterIdx);
   }
 
   function splitDocumentSections(fullText) {
@@ -1017,16 +1356,50 @@
     var balconyStart = findEarliestMatch(text, SECTION_ANCHORS.balcony, afterPrice);
     var optionSearchFrom = balconyStart >= 0 ? balconyStart + 1 : afterPrice;
     var optionStart = findEarliestMatch(text, SECTION_ANCHORS.option, optionSearchFrom);
+    var optionChapterHeading = findChapterFirstHeading(text, CHAPTER_NUMBER_OPTION_RE, optionSearchFrom);
+    if (optionChapterHeading >= 0 && (optionStart < 0 || optionChapterHeading < optionStart)) optionStart = optionChapterHeading;
     var nextMajorStart = findEarliestMatch(text, [NEXT_MAJOR_SECTION_RE], afterPrice);
 
     var area = sliceSection(text, areaStart, [priceStart]);
-    var price = sliceSection(text, priceStart, [balconyStart, optionStart, nextMajorStart]);
-    var balcony = sliceSection(text, balconyStart, [optionStart, nextMajorStart, findNextHeadingBoundary(text, balconyStart)]);
-    var option = sliceSection(text, optionStart, [nextMajorStart, findNextHeadingBoundary(text, optionStart)]);
+    var priceEndCandidates = [balconyStart, optionStart, nextMajorStart, findNextHeadingBoundary(text, priceStart)];
+    var priceEndIdx = priceStart >= 0 ? computeSectionEnd(text, priceStart, priceEndCandidates) : -1;
+    var price = sliceSection(text, priceStart, priceEndCandidates);
+    var balconyEndCandidates = [optionStart, nextMajorStart, findSectionEndHeading(text, balconyStart)];
+    var balconyEndIdx = balconyStart >= 0 ? computeSectionEnd(text, balconyStart, balconyEndCandidates) : -1;
+    var balcony = sliceSection(text, balconyStart, balconyEndCandidates);
+    var optionEndCandidates = [nextMajorStart, findSectionEndHeading(text, optionStart)];
+    var optionEndIdx = optionStart >= 0 ? computeSectionEnd(text, optionStart, optionEndCandidates) : -1;
+    var option = sliceSection(text, optionStart, optionEndCandidates);
 
     if (areaStart >= 0 && priceStart >= 0) {
       var repaired = repairMisplacedAreaTable(area, price);
       if (repaired) { area = repaired.area; price = repaired.price; }
+    }
+
+    if (areaStart >= 0 && priceStart >= 0) {
+      var areaCodes = parseAreaSection(area).map(function (a) { return a.code; });
+      var firstPositive = function () {
+        var best = -1;
+        for (var i = 0; i < arguments.length; i++) {
+          var v = arguments[i];
+          if (v >= 0 && (best === -1 || v < best)) best = v;
+        }
+        return best;
+      };
+      var priceRepairBound = firstPositive(balconyStart, optionStart, nextMajorStart);
+      var priceRepaired = repairFragmentedPriceTable(text, price, priceEndIdx, areaCodes, priceRepairBound);
+      if (priceRepaired) { price = priceRepaired; }
+
+      if (balconyStart >= 0) {
+        var balconyRepairBound = firstPositive(optionStart, nextMajorStart);
+        var balconyRepaired = repairFragmentedAmountSection(text, balcony, balconyEndIdx, areaCodes, balconyRepairBound);
+        if (balconyRepaired) { balcony = balconyRepaired; }
+      }
+      if (optionStart >= 0) {
+        var optionRepairBound = firstPositive(nextMajorStart);
+        var optionRepaired = repairFragmentedAmountSection(text, option, optionEndIdx, areaCodes, optionRepairBound);
+        if (optionRepaired) { option = optionRepaired; }
+      }
     }
 
     return {
@@ -1058,7 +1431,8 @@
     parseFlexDate: parseFlexDate,
     parseRelativeOffset: parseRelativeOffset,
     despaceKeywords: despaceKeywords,
-    extractDong: extractDong
+    extractDong: extractDong,
+    stripCatalogTables: stripCatalogTables
   };
 
   if (typeof module !== 'undefined' && module.exports) {
