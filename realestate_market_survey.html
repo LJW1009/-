@@ -1236,6 +1236,24 @@ function regionMatches(cx,sigungu){
   if(minorTok&&!sigungu.replace(/\s/g,'').includes(minorTok.replace(/\s/g,'')))return false;
   return true;
 }
+// 네이버 부동산 기준으로 등록한 단지명이 국토부 실거래가 CSV의 단지명과 다르게 표기되는 경우가
+// 많아(예: 같은 단지를 "OO아파트" vs "OO" 등으로 다르게 부름), 등록된 단지 주소(cx.addr)와
+// CSV의 번지/도로명이 실제로 일치하면 단지명이 완전히 달라도 같은 단지로 인식한다.
+// true=주소로 확실히 동일 단지 확인됨 / null=주소로는 판단 불가(이름 유사도 판정에 맡김)
+function addressMatches(cx,sigungu,bunji,doro){
+  const addr=(cx.addr||'').replace(/\s/g,'');
+  if(!addr)return null;
+  if(regionMatches(cx,sigungu)===false)return null; // 지역부터 다르면 번지가 우연히 겹쳐도 같은 단지가 아님
+  if(bunji){
+    const bunjiNorm=bunji.replace(/\s/g,'').replace(/^0+(?=\d)/,'');
+    if(bunjiNorm&&addr.includes(bunjiNorm))return true;
+  }
+  if(doro){
+    const doroNorm=doro.replace(/\s/g,'');
+    if(doroNorm&&(addr.includes(doroNorm)||doroNorm.includes(addr)))return true;
+  }
+  return null;
+}
 
 function processCSV(file,cid,type){
   // type: 'trade' | 'jeonse' | 'wolse'
@@ -1266,6 +1284,11 @@ function processCSV(file,cid,type){
       // 컬럼 인덱스 동적 탐색 (컬럼 순서 변경 대응)
       const ci_name   =hdrs.findIndex(h=>h.includes('단지명'));
       const ci_sigungu=hdrs.findIndex(h=>h.includes('시군구'));
+      // 번지(지번) — "번지" 단독 컬럼 우선, 없으면 본번+부번 조합으로 구성
+      const ci_bunji  =hdrs.findIndex(h=>h==='번지'||h.includes('번지'));
+      const ci_bonbun =hdrs.findIndex(h=>h.includes('본번'));
+      const ci_bubun  =hdrs.findIndex(h=>h.includes('부번'));
+      const ci_doro   =hdrs.findIndex(h=>h.includes('도로명')&&!h.includes('건물')&&!h.includes('일련'));
       const ci_type   =hdrs.findIndex(h=>h.includes('전월세구분'));
       const ci_excl   =hdrs.findIndex(h=>h.includes('전용면적'));
       const ci_ym     =hdrs.findIndex(h=>h.includes('계약년월'));
@@ -1310,14 +1333,21 @@ function processCSV(file,cid,type){
         return !d||d==='-'||!d.trim()||d.trim()==='-';
       });
 
-      // ── 단지명 매칭: 띄어쓰기 무시 + 70% 유사도. 단, 시군구가 확실히 다른 지역이면
-      // (같은 건설사 브랜드명이 여러 지역에 쓰여 이름만으로는 "래미안 강남"과 "래미안 강북"처럼
-      // 오인식될 수 있어) 이름 점수와 무관하게 제외한다.
+      // ── 단지 매칭 ──
+      // 1) 시군구가 확실히 다른 지역이면 (같은 건설사 브랜드명이 여러 지역에 쓰여 이름만으로는
+      //    "래미안 강남"과 "래미안 강북"처럼 오인식될 수 있어) 이름 점수와 무관하게 제외
+      // 2) 등록된 단지 주소(cx.addr)와 CSV의 번지/도로명이 실제로 일치하면, 네이버 부동산 기준
+      //    등록명과 국토부 CSV 단지명 표기가 달라도 같은 단지로 인정 (이름 유사도 검사 생략)
+      // 3) 그 외에는 기존처럼 단지명 유사도(70% 이상)로 판정
       let regionRejected=0;
       const matched=valid.filter(r=>{
         const csvName=ci_name>=0?(r.__vals[ci_name]||''):'';
         const csvSigungu=ci_sigungu>=0?(r.__vals[ci_sigungu]||''):'';
         if(regionMatches(cx,csvSigungu)===false){regionRejected++;return false;}
+        const csvBunji=ci_bunji>=0?(r.__vals[ci_bunji]||''):
+          (ci_bonbun>=0?(r.__vals[ci_bonbun]||'')+(ci_bubun>=0&&r.__vals[ci_bubun]&&r.__vals[ci_bubun]!=='0'?'-'+r.__vals[ci_bubun]:''):'');
+        const csvDoro=ci_doro>=0?(r.__vals[ci_doro]||''):'';
+        if(addressMatches(cx,csvSigungu,csvBunji,csvDoro)===true)return true;
         if(!cx.name||!csvName)return true;
         return simScore(cx.name,csvName)>=0.7;
       });
