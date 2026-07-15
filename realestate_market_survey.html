@@ -121,7 +121,11 @@ tbody tr:hover td{background:#f5f5f3}
     <div><div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
         <div class="sec" style="margin:0">단지 기본정보</div>
-        <button class="btn btn-p btn-sm" onclick="newCx()"><i class="ti ti-plus"></i>새 단지</button>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-sm" onclick="document.getElementById('kb-info-file').click()" title="KB부동산 '금주시세' 엑셀을 올리면 단지명·주소·지역·유형·평형 정보를 자동으로 채웁니다. 채워진 값은 저장 전에 그대로 수정 가능합니다."><i class="ti ti-file-upload"></i>KB시세 파일로 자동입력</button>
+          <button class="btn btn-p btn-sm" onclick="newCx()"><i class="ti ti-plus"></i>새 단지</button>
+        </div>
+        <input type="file" id="kb-info-file" accept=".xlsx,.xls" style="display:none" onchange="handleKbInfoUpload(event)">
       </div>
       <div id="msg-cx"></div>
       <div class="row">
@@ -688,6 +692,123 @@ function delCx(id){
 }
 
 // ═══════════════════════════════════════════════════════════
+// KB부동산 "금주시세" 엑셀 업로드 (단지정보 자동입력 / KB시세 자동입력)
+// ═══════════════════════════════════════════════════════════
+// 고정 레이아웃: B4=단지명, B5=대표번지, B6=기타번지,
+// "시세기준일" 라벨이 있는 행 = 그룹헤더(공급면적|계약면적/전용면적/타입/매매가/전세가/월세가),
+// 그 다음 행 = 하위/일반/상위평균가·보증금/월세 서브헤더, 그다음 행부터 데이터.
+// 데이터 열: 0시세기준일 1면적(공급|계약) 2전용면적 3타입 4매매하위 5매매일반 6매매상위
+//           7전세하위 8전세일반 9전세상위 10보증금 11월세(범위 텍스트)
+// 같은 타입 문자(A/B/C..)가 다른 평형대에서 재사용되는 경우가 있어(같은 단지 내 여러 동/블록),
+// 타입 문자만으로는 유일 식별이 안 됨 — 반드시 전용/공급(계약)면적으로 매칭해야 한다.
+function parseKbSiseAOA(aoa){
+  const norm=v=>(v==null?'':String(v).trim());
+  let name=null,addr=null,hdrRow=-1,areaLabel='';
+  for(let i=0;i<aoa.length;i++){
+    const row=aoa[i]||[];
+    if(norm(row[0])==='단지명')name=norm(row[1]);
+    else if(norm(row[0])==='대표번지')addr=norm(row[1]);
+    else if(hdrRow<0&&norm(row[0])==='시세기준일'){
+      // 서브헤더 행(하위/일반/상위평균가)도 A열이 "시세기준일"이라 첫 번째 매치만 채택해야 함
+      hdrRow=i;
+      row.forEach(c=>{if(norm(c)==='공급면적'||norm(c)==='계약면적')areaLabel=norm(c);});
+    }
+  }
+  if(!name||hdrRow<0)return null;
+  const oft=areaLabel==='계약면적';
+  const rows=[];
+  for(let i=hdrRow+2;i<aoa.length;i++){
+    const row=aoa[i]||[];
+    const areaVal=parseFloat(row[1]),excl=parseFloat(row[2]);
+    if(isNaN(areaVal)||isNaN(excl))continue;
+    const label=norm(row[3]);
+    const tradeMid=parseFloat(row[5]); // 매매 일반평균가
+    rows.push({excl,areaVal,label:label==='-'?'':label,tradeAvg:isNaN(tradeMid)?null:tradeMid});
+  }
+  if(!rows.length)return null;
+  return{name,addr,oft,rows};
+}
+// 대표번지(예: "경기도 양주시 옥정동 955")를 대분류/소분류로 분리
+function splitKbAddr(addr){
+  const MAJORS=['서울시','부산시','대구시','인천시','광주시','대전시','울산시','세종시','경기도','강원도','충청북도','충청남도','전라북도','전라남도','경상북도','경상남도','제주도'];
+  const tok=(addr||'').trim().split(/\s+/);
+  if(!tok.length)return{major:'',minor:''};
+  const cand=normProvince(tok[0]);
+  const major=MAJORS.find(m=>normProvince(m)===cand)||'';
+  // 마지막 토큰이 순수 번지 숫자(-포함)면 소분류에서 제외
+  let rest=tok.slice(1);
+  if(rest.length&&/^[0-9-]+$/.test(rest[rest.length-1]))rest=rest.slice(0,-1);
+  return{major,minor:rest.join(' ')};
+}
+function handleKbInfoUpload(e){
+  const f=e.target.files[0];if(!f)return;
+  e.target.value='';
+  const reader=new FileReader();
+  reader.onload=function(ev){
+    try{
+      const wb=XLSX.read(ev.target.result,{type:'array'});
+      const ws=wb.Sheets[wb.SheetNames.includes('금주시세')?'금주시세':wb.SheetNames[0]];
+      const aoa=XLSX.utils.sheet_to_json(ws,{header:1,defval:null});
+      const parsed=parseKbSiseAOA(aoa);
+      if(!parsed){showMsg('msg-cx','KB시세 파일 형식을 인식하지 못했습니다.','me');return;}
+      if(typeRows.length&&!confirm('현재 입력 중인 타입별 평형 정보('+typeRows.length+'개)를 파일 내용으로 덮어씁니다. 계속할까요?'))return;
+      const{major,minor}=splitKbAddr(parsed.addr);
+      if(major)document.getElementById('c-region-major').value=major;
+      document.getElementById('c-region-minor').value=minor;
+      document.getElementById('c-name').value=parsed.name;
+      document.getElementById('c-addr').value=parsed.addr||'';
+      document.getElementById('c-type').value=parsed.oft?'오피스텔':'아파트';
+      toggleCF();
+      typeRows=parsed.rows.map(r=>{
+        const exclPy=toPy(r.excl);
+        const suppPy=parsed.oft?0:toPy(r.areaVal);
+        const contractPy=parsed.oft?toPy(r.areaVal):0;
+        return{id:'r'+Date.now()+Math.random().toString(36).slice(2),
+          typeName:r.label,excl:r.excl,supply:parsed.oft?'':r.areaVal,contract:parsed.oft?r.areaVal:'',
+          exclPy,suppPy,contractPy,units:'',groupLabel:''};
+      });
+      renderTT();
+      showMsg('msg-cx','"'+parsed.name+'" 파일에서 '+typeRows.length+'개 타입 인식 완료. 세대수·사용승인일·총세대수 등은 직접 입력해 주세요.','ms');
+    }catch(err){showMsg('msg-cx','파일 처리 오류: '+err.message,'me');}
+  };
+  reader.readAsArrayBuffer(f);
+}
+function handleKbSiseUpload(e,cid){
+  const f=e.target.files[0];if(!f)return;
+  e.target.value='';
+  const cx=DB.complexes.find(c=>c.id===cid);if(!cx)return;
+  const reader=new FileReader();
+  reader.onload=function(ev){
+    try{
+      const wb=XLSX.read(ev.target.result,{type:'array'});
+      const ws=wb.Sheets[wb.SheetNames.includes('금주시세')?'금주시세':wb.SheetNames[0]];
+      const aoa=XLSX.utils.sheet_to_json(ws,{header:1,defval:null});
+      const parsed=parseKbSiseAOA(aoa);
+      if(!parsed){showMsg('msg-kb-file','KB시세 파일 형식을 인식하지 못했습니다.','me');return;}
+      let filled=0;const unmatched=[];
+      cx.types.forEach(function(t){
+        const areaVal=cx.type==='오피스텔'?(t.contract||0):(t.supply||0);
+        let best=null,bestD=Infinity;
+        parsed.rows.forEach(function(r){
+          if(r.tradeAvg==null)return;
+          const d=Math.abs(r.excl-(t.excl||0))+Math.abs(r.areaVal-areaVal);
+          if(d<bestD){bestD=d;best=r;}
+        });
+        // 전용+공급(계약) 오차 합이 0.03㎡ 이내일 때만 인정 (실수 반올림 오차만 허용)
+        if(best&&bestD<=0.03){
+          const el=document.getElementById('kb-'+encodeURIComponent(t.typeName));
+          if(el){el.value=Math.round(best.tradeAvg);filled++;}
+        } else {
+          unmatched.push(t.typeName||'(이름없음)');
+        }
+      });
+      showMsg('msg-kb-file',filled+'개 타입에 매매 일반평균가 자동입력 완료'+(unmatched.length?' · 미매칭: '+unmatched.join(', '):'')+' — 저장 전까지 값을 직접 수정할 수 있습니다.','ms');
+    }catch(err){showMsg('msg-kb-file','파일 처리 오류: '+err.message,'me');}
+  };
+  reader.readAsArrayBuffer(f);
+}
+
+// ═══════════════════════════════════════════════════════════
 // 데이터 입력 폼
 // ═══════════════════════════════════════════════════════════
 function initMD(cid,month){
@@ -808,6 +929,11 @@ function loadInputForm(){
     // ── KB시세 ──
     '<div id="it-kb" style="display:none">'+
     '<div id="lu-kb" style="font-size:12px;color:var(--t2);margin-bottom:10px">KB부동산 시세 평균 · 만원 · 없으면 비워두세요'+luBadge('kb')+'<br><b style="color:var(--ad)">※ 결과 조회 시 가장 최신 입력월 기준으로 표시</b></div>'+
+    '<div style="margin-bottom:10px">'+
+    '<button class="btn btn-sm" onclick="document.getElementById(\'kb-sise-file\').click()" title="KB부동산 \'금주시세\' 엑셀을 올리면 전용/공급(계약)면적이 가장 가까운 타입에 매매 일반평균가를 자동으로 채웁니다. 저장 전까지는 그대로 수정 가능합니다."><i class="ti ti-file-upload"></i>KB시세 파일 업로드</button>'+
+    '<input type="file" id="kb-sise-file" accept=".xlsx,.xls" style="display:none" onchange="handleKbSiseUpload(event,\''+cid+'\')">'+
+    '<div id="msg-kb-file" style="margin-top:6px"></div>'+
+    '</div>'+
     cx.types.map(function(t){
       var ex=md.kb.find(function(k){return k.typeName===t.typeName;})||{};
       return '<div class="row" style="align-items:flex-end">'+
