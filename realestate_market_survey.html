@@ -1112,7 +1112,7 @@ function renderTradeList(cid,month){
     '<div style="font-size:11px;color:var(--t3);margin-top:6px">✏️ 수정 버튼 → 타입·가격·층·계약일 변경 후 저장</div>';
   trades.forEach(function(t,i){var s=document.getElementById('et-type-'+i);if(s)s.value=t.typeName;});
 }
-function startEdit(i){document.getElementById('tr-row-'+i).style.background='var(--bg2)';document.getElementById('tr-edit-'+i).style.display='';}
+function startEdit(i){document.getElementById('tr-row-'+i).style.background='var(--bg2)';document.getElementById('tr-edit-'+i).style.display='table-row';}
 function cancelEdit(i){document.getElementById('tr-row-'+i).style.background='';document.getElementById('tr-edit-'+i).style.display='none';}
 function saveEdit(cid,month,i){
   const nt=document.getElementById('et-type-'+i).value;
@@ -1187,7 +1187,7 @@ function renderJeonseList(cid,month){
     '<div class="tw"><table><thead><tr><th>#</th><th>타입</th><th>전세가(만)</th><th>층</th><th>계약일</th><th>수정</th><th>삭제</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
   items.forEach(function(t,i){var s=document.getElementById('jt-type-'+i);if(s)s.value=t.typeName;});
 }
-function startEditJs(i){document.getElementById('js-row-'+i).style.background='var(--bg2)';document.getElementById('js-edit-'+i).style.display='';}
+function startEditJs(i){document.getElementById('js-row-'+i).style.background='var(--bg2)';document.getElementById('js-edit-'+i).style.display='table-row';}
 function cancelEditJs(i){document.getElementById('js-row-'+i).style.background='';document.getElementById('js-edit-'+i).style.display='none';}
 function saveEditJs(cid,month,i){
   const nt=document.getElementById('jt-type-'+i).value;
@@ -1266,7 +1266,7 @@ function renderWolseList(cid,month){
     '<div class="tw"><table><thead><tr><th>#</th><th>타입</th><th>보증금(만)</th><th>월세(만)</th><th>층</th><th>계약일</th><th>수정</th><th>삭제</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
   items.forEach(function(t,i){var s=document.getElementById('wt-type-'+i);if(s)s.value=t.typeName;});
 }
-function startEditWs(i){document.getElementById('ws-row-'+i).style.background='var(--bg2)';document.getElementById('ws-edit-'+i).style.display='';}
+function startEditWs(i){document.getElementById('ws-row-'+i).style.background='var(--bg2)';document.getElementById('ws-edit-'+i).style.display='table-row';}
 function cancelEditWs(i){document.getElementById('ws-row-'+i).style.background='';document.getElementById('ws-edit-'+i).style.display='none';}
 function saveEditWs(cid,month,i){
   const nt=document.getElementById('wt-type-'+i).value;
@@ -1905,7 +1905,7 @@ function dvStartEdit(cid,month,i,dtype){
   var pre='dv-'+{trade:'tr',jeonse:'js',wolse:'ws'}[dtype];
   var row=document.getElementById(pre+'-row-'+month+'-'+i);
   var edit=document.getElementById(pre+'-edit-'+month+'-'+i);
-  if(row)row.style.background='var(--bg2)';if(edit)edit.style.display='';
+  if(row)row.style.background='var(--bg2)';if(edit)edit.style.display='table-row';
 }
 function dvCancelEdit(month,i,dtype){
   var pre='dv-'+{trade:'tr',jeonse:'js',wolse:'ws'}[dtype];
