@@ -159,6 +159,7 @@ tbody tr:hover td{background:#f5f5f3}
       </div>
       <div class="tw">
         <table><thead><tr>
+          <th style="width:26px"></th>
           <th>타입명</th><th>전용(㎡)</th><th>공급(㎡)</th>
           <th id="th-ct" style="display:none">계약(㎡)</th>
           <th>전용(평)</th><th>공급(평)</th>
@@ -253,6 +254,7 @@ tbody tr:hover td{background:#f5f5f3}
 // ═══════════════════════════════════════════════════════════
 let DB={complexes:[],marketData:{}};
 let typeRows=[];
+let dragSrcId=null; // 타입별 평형 정보 표의 드래그앤드롭 재정렬용
 let editCxId=null;
 
 function loadDB(){
@@ -593,7 +595,22 @@ function renderTT(){
   tb.innerHTML='';
   typeRows.forEach(r=>{
     const tr=document.createElement('tr');
+    tr.dataset.id=r.id;
+    tr.ondragover=function(ev){ev.preventDefault();ev.dataTransfer.dropEffect='move';tr.style.background='var(--bll)';};
+    tr.ondragleave=function(){tr.style.background='';};
+    tr.ondrop=function(ev){
+      ev.preventDefault();tr.style.background='';
+      if(!dragSrcId||dragSrcId===r.id)return;
+      const fromIdx=typeRows.findIndex(x=>x.id===dragSrcId);
+      const toIdx=typeRows.findIndex(x=>x.id===r.id);
+      dragSrcId=null;
+      if(fromIdx<0||toIdx<0)return;
+      const[moved]=typeRows.splice(fromIdx,1);
+      typeRows.splice(toIdx,0,moved);
+      renderTT();
+    };
     tr.innerHTML=
+      '<td style="cursor:grab;color:var(--t3);text-align:center;user-select:none" draggable="true" ondragstart="dragSrcId=\''+r.id+'\';event.dataTransfer.effectAllowed=\'move\';" ondragend="this.closest(\'tr\').style.background=\'\'" title="드래그해서 순서 변경">⠿</td>'+
       '<td><input class="inp" style="width:65px" value="'+(r.typeName!=null?r.typeName:'')+'" oninput="uTR(\''+r.id+'\',\'typeName\',this.value)" placeholder="122A"></td>'+
       '<td><input class="inp" style="width:68px" type="number" value="'+(r.excl||'')+'" oninput="uTR(\''+r.id+'\',\'excl\',this.value);calcPyR(\''+r.id+'\')" placeholder="72.41"></td>'+
       '<td><input class="inp" style="width:68px" type="number" value="'+(r.supply||'')+'" oninput="uTR(\''+r.id+'\',\'supply\',this.value);calcPyR(\''+r.id+'\')" placeholder="105.57"></td>'+
@@ -751,7 +768,16 @@ function handleKbInfoUpload(e){
       const aoa=XLSX.utils.sheet_to_json(ws,{header:1,defval:null});
       const parsed=parseKbSiseAOA(aoa);
       if(!parsed){showMsg('msg-cx','KB시세 파일 형식을 인식하지 못했습니다.','me');return;}
-      if(typeRows.length&&!confirm('현재 입력 중인 타입별 평형 정보('+typeRows.length+'개)를 파일 내용으로 덮어씁니다. 계속할까요?'))return;
+      // 단지 일치 판정: 1순위 주소, 2순위 단지명 — 이미 등록된 단지와 일치하면 새로 만들지 말고 불러와서 갱신할지 물어봄
+      const match=findComplexByAddrOrName(DB.complexes,parsed.name,parsed.addr);
+      let skipOverwriteConfirm=false;
+      if(match&&match.id!==editCxId){
+        if(confirm('이 파일은 이미 등록된 "'+match.name+'"와(과) 일치하는 것으로 보입니다.\n해당 단지를 불러와서 파일 내용으로 갱신할까요?\n("취소"를 누르면 현재 화면에만 반영되고, 기존 등록 단지는 그대로 유지됩니다)')){
+          loadCx(match.id);
+          skipOverwriteConfirm=true;
+        }
+      }
+      if(!skipOverwriteConfirm&&typeRows.length&&!confirm('현재 입력 중인 타입별 평형 정보('+typeRows.length+'개)를 파일 내용으로 덮어씁니다. 계속할까요?'))return;
       const{major,minor}=splitKbAddr(parsed.addr);
       if(major)document.getElementById('c-region-major').value=major;
       document.getElementById('c-region-minor').value=minor;
@@ -785,6 +811,12 @@ function handleKbSiseUpload(e,cid){
       const aoa=XLSX.utils.sheet_to_json(ws,{header:1,defval:null});
       const parsed=parseKbSiseAOA(aoa);
       if(!parsed){showMsg('msg-kb-file','KB시세 파일 형식을 인식하지 못했습니다.','me');return;}
+      // 단지 일치 판정: 1순위 주소, 2순위 단지명 — 지금 선택된 단지와 일치하는지 먼저 확인
+      if(!findComplexByAddrOrName([cx],parsed.name,parsed.addr)){
+        if(!confirm('업로드한 파일("'+parsed.name+'"'+(parsed.addr?', '+parsed.addr:'')+')이 현재 선택된 단지("'+cx.name+'")와 일치하는지 확인되지 않습니다.\n그래도 면적 기준으로 매칭을 진행할까요?')){
+          showMsg('msg-kb-file','취소되었습니다.','mi');return;
+        }
+      }
       let filled=0;const unmatched=[];
       cx.types.forEach(function(t){
         const areaVal=cx.type==='오피스텔'?(t.contract||0):(t.supply||0);
@@ -1377,6 +1409,37 @@ function addressMatches(cx,sigungu,bunji,doro){
   if(doro){
     const doroNorm=doro.replace(/\s/g,'');
     if(doroNorm&&(addr.includes(doroNorm)||doroNorm.includes(addr)))return true;
+  }
+  return null;
+}
+// 자유 텍스트 주소 두 개(예: KB시세 파일의 대표번지 vs 등록된 단지 주소)가 같은 곳을 가리키는지 판정.
+// 시/도가 다르면 무조건 다른 곳, 그 외에는 문자열 포함 관계로 판단.
+function addrStringMatches(a,b){
+  if(!a||!b)return false;
+  const pa=normProvince((a.trim().split(/\s+/)[0]||''));
+  const pb=normProvince((b.trim().split(/\s+/)[0]||''));
+  if(pa&&pb&&pa!==pb)return false;
+  const na=a.replace(/\s/g,''),nb=b.replace(/\s/g,'');
+  return na.includes(nb)||nb.includes(na);
+}
+// ── 전체 프로세스 공통 단지 일치 판정: 1순위 주소, 2순위 단지명 ──
+// CSV 실거래가 매칭(processCSV), KB시세 파일로 단지정보/시세 자동입력 등 어디서든 이 우선순위를 따른다.
+// candidates 중에서 name/addr에 해당하는 단지 하나를 찾아 반환(못 찾으면 null).
+function findComplexByAddrOrName(candidates,name,addr){
+  if(addr){
+    const hits=candidates.filter(cx=>addrStringMatches(addr,cx.addr));
+    if(hits.length===1)return hits[0];
+    if(hits.length>1){
+      // 주소만으로 여러 후보가 겹치면 그 중 단지명 유사도가 가장 높은 것을 채택
+      let best=null,bestS=-1;
+      hits.forEach(cx=>{const s=name?simScore(cx.name,name):0;if(s>bestS){bestS=s;best=cx;}});
+      return best;
+    }
+  }
+  if(name){
+    let best=null,bestS=0;
+    candidates.forEach(cx=>{const s=simScore(cx.name,name);if(s>=0.7&&s>bestS){bestS=s;best=cx;}});
+    return best;
   }
   return null;
 }
