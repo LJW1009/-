@@ -255,6 +255,7 @@ tbody tr:hover td{background:#f5f5f3}
 let DB={complexes:[],marketData:{}};
 let typeRows=[];
 let dragSrcId=null; // 타입별 평형 정보 표의 드래그앤드롭 재정렬용
+let dragCxId=null; // 단지 목록의 드래그앤드롭 재정렬용
 let editCxId=null;
 
 function loadDB(){
@@ -673,13 +674,35 @@ function renderCxList(){
   const list=filteredCx('sel-region','sel-type','sel-minor');
   const el=document.getElementById('cx-list');if(!el)return;
   if(!list.length){el.innerHTML='<div class="empty">등록된 단지 없음</div>';return;}
+  // 타입별 평형 표(renderTT)와 동일한 방식의 드래그앤드롭 재정렬 — 같은 지역 내 단지 순서를
+  // 바꾸면 DB.complexes 배열 자체의 순서가 바뀌어, 목록 표시뿐 아니라 엑셀 내보내기 순서에도
+  // 그대로 반영된다(내보내기 탭도 DB.complexes 순서를 그대로 따름).
   el.innerHTML=list.map(c=>
-    '<div class="li '+(editCxId===c.id?'sel':'')+'" onclick="loadCx(\''+c.id+'\')">'+
+    '<div class="li '+(editCxId===c.id?'sel':'')+'" draggable="true" '+
+    'ondragstart="dragCxId=\''+c.id+'\';event.dataTransfer.effectAllowed=\'move\';" '+
+    'ondragend="this.style.background=\'\'" '+
+    'ondragover="event.preventDefault();event.dataTransfer.dropEffect=\'move\';this.style.background=\'var(--bll)\';" '+
+    'ondragleave="this.style.background=\'\'" '+
+    'ondrop="event.preventDefault();this.style.background=\'\';dropCx(\''+c.id+'\')" '+
+    'onclick="loadCx(\''+c.id+'\')">'+
+    '<div style="display:flex;align-items:center;gap:6px;overflow:hidden">'+
+    '<span style="cursor:grab;color:var(--t3);user-select:none;flex-shrink:0" title="드래그해서 순서 변경">⠿</span>'+
     '<div><span style="font-weight:700;font-size:13px">'+c.name+'</span>'+
     '<span class="badge '+(c.type==='아파트'?'ba':'bo')+'" style="margin-left:5px">'+c.type+'</span>'+
     '<div style="font-size:11px;color:var(--t3);margin-top:2px">'+c.region+' · '+c.totalUnits+'세대 · '+c.types.length+'타입</div></div>'+
+    '</div>'+
     '<button class="btn btn-d btn-sm" onclick="event.stopPropagation();delCx(\''+c.id+'\')"><i class="ti ti-trash"></i></button></div>'
   ).join('');
+}
+function dropCx(targetId){
+  if(!dragCxId||dragCxId===targetId){dragCxId=null;return;}
+  const fromIdx=DB.complexes.findIndex(x=>x.id===dragCxId);
+  dragCxId=null;
+  if(fromIdx<0)return;
+  const[moved]=DB.complexes.splice(fromIdx,1);
+  const toIdx=DB.complexes.findIndex(x=>x.id===targetId); // splice 이후 인덱스로 다시 계산
+  if(toIdx<0){DB.complexes.push(moved);}else{DB.complexes.splice(toIdx,0,moved);}
+  saveDB();renderCxList();renderExpList();
 }
 function loadCx(id){
   const c=DB.complexes.find(x=>x.id===id);if(!c)return;
