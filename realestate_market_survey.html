@@ -2599,9 +2599,10 @@ function exportExcel(){
       const nameRow=new Array(totalCols).fill(null).map(()=>WB(''));
       nameRow[0]={v:'■ '+cx.name,s:{font:{...FONT,bold:false},fill:WHITE,alignment:{horizontal:'left',vertical:'center'}}};
       const baseColor=oft?'FF0000':'0070C0';
-      nameRow[baseColIdx]={v:'*'+baseWord,s:{font:{...FONT,bold:true,color:{rgb:baseColor}},alignment:{horizontal:'left',vertical:'center'}}};
+      nameRow[baseColIdx]={v:'*'+baseWord,s:{font:{...FONT,bold:true,color:{rgb:baseColor}},fill:WHITE,alignment:{horizontal:'center',vertical:'center'}}};
       pushRow(nameRow);
       addMerge(R-1,0,R-1,2);
+      addMerge(R-1,baseColIdx,R-1,visibleCols-1); // *공급/전용평형기준 라벨을 맨 오른쪽 셀까지 병합해 가운데 정렬
       const r2=new Array(totalCols).fill(null).map(()=>WB(''));
       r2[0]={v:'사용승인일 '+(cx.approved||'-'),s:{font:FONT,fill:WHITE,alignment:{horizontal:'left',vertical:'center'}}};
       r2[2]={v:'총 '+totU+' '+unitWord+'수',s:{font:FONT,fill:WHITE,alignment:{horizontal:'left',vertical:'center'}}};
@@ -2776,28 +2777,36 @@ function exportExcel(){
       });
       const totalListings=getListingTotal(cx.id,askM);
       const listStr=totalListings!=null?totalListings+'건':'-';
+      // M()은 항상 4방향 테두리(ALLB)를 그리므로, 보이는 열 범위(visibleCols)를 벗어나는
+      // 매매가/호가원가/KB원가 숨김열까지 M('')로 채우면 그 칸에도 테두리가 생겨 표가 빈 칸으로
+      // 늘어나 보인다. 보이는 범위 밖은 null로 남겨 셀 자체를 만들지 않는다.
       if(hasRent){
         pushRow([
           M('매물 건수'),M(listStr),M('실거래(최근1년)'),M(tot1y_tr+'건'),
           M('전세실거래'),M(tot1y_js+'건'),M('월세실거래'),M(tot1y_ws+'건'),
-          M(''),M(''),M(''),M(''),M(''),M(''),M(''),M(''),M('')
+          M(''),M(''),M(''),M(''),M(''),M(''),
+          null,null,null
         ]);
       } else {
         pushRow([
           M('매물 건수'),M(listStr),M('실거래(최근1년)'),M(tot1y_tr+'건'),
           M(''),M(''),M(''),M(''),
-          M(''),M(''),M(''),M(''),M(''),M(''),M(''),M(''),M('')
+          null,null,null,null,null,null,null,null,null
         ]);
       }
       const cntR=R-1;
       const blockEndR=R-1;
-      for(let cc=0;cc<totalCols;cc++){
+      // 겉 테두리는 실제로 보이는 열(visibleCols)까지만 — totalCols는 매매가/호가원가/KB원가 등
+      // 숨김·패딩용 열까지 포함하고 있어서, 이 기준으로 테두리를 그리면 !hasRent 단지의 경우
+      // 내용이 전혀 없는 전세/환산보증금/임대수익률 열(숨김 처리되지 않은 열)까지 표가 쓸데없이
+      // 늘어나 보이는 문제가 있었다.
+      for(let cc=0;cc<visibleCols;cc++){
         markBorder(blockStartR,cc,'top');
         markBorder(blockEndR,cc,'bottom');
       }
       for(let rr=blockStartR;rr<=blockEndR;rr++){
         markBorder(rr,0,'left');
-        markBorder(rr,totalCols-1,'right');
+        markBorder(rr,visibleCols-1,'right');
       }
     });
     const sheetOft=cxList[0]?.type==='오피스텔';
