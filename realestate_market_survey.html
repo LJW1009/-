@@ -1370,6 +1370,20 @@ function extractComplexSuffix(name){
   const m=name.match(/([0-9A-Za-z]+)\s*(단지|블록|차|동|구역|지구|BL|블럭)\)?\s*$/i);
   return m?(m[1]+m[2]).toLowerCase():null;
 }
+// 인접한 두 글자(바이그램) 집합의 겹치는 비율(Dice 계수) — 순서를 무시하고 같은 글자가
+// 여러 번 나오면 점수를 부풀리던 예전 "공통 문자 비율" 방식과 달리, 실제로 인접해서 겹치는
+// 조합만 세기 때문에 브랜드명만 같고 나머지는 전혀 다른 단지끼리 오인식되는 걸 훨씬 잘 걸러낸다.
+function bigramDice(a,b){
+  if(a.length<2||b.length<2)return a===b?1:0;
+  const bigrams=s=>{const r=[];for(let i=0;i<s.length-1;i++)r.push(s.slice(i,i+2));return r;};
+  const ba=bigrams(a), pool=bigrams(b);
+  let matches=0;
+  for(const g of ba){
+    const idx=pool.indexOf(g);
+    if(idx>=0){matches++;pool.splice(idx,1);}
+  }
+  return (2*matches)/(ba.length+bigrams(b).length);
+}
 function simScore(a,b){
   // 띄어쓰기 제거 후 포함 여부 + 유사도 계산 (70% 이상이면 일치)
   const na=a.replace(/\s/g,'').toLowerCase();
@@ -1380,14 +1394,10 @@ function simScore(a,b){
   const sa=extractComplexSuffix(a), sb=extractComplexSuffix(b);
   if(sa&&sb&&sa!==sb)return 0;
   if(na.includes(nb)||nb.includes(na))return 0.9;
-  // 공통 문자 비율 (간단 LCS 근사)
-  let match=0;
-  const shorter=na.length<nb.length?na:nb;
-  const longer=na.length<nb.length?nb:na;
-  for(let i=0;i<shorter.length;i++){
-    if(longer.includes(shorter[i]))match++;
-  }
-  return match/Math.max(na.length,nb.length);
+  // 예: "힐스테이트 더 운정1단지" vs "힐스테이트이스턴베이"처럼 브랜드 접두어("힐스테이트")만
+  // 같고 실제로는 전혀 무관한 단지가, 예전 방식(같은 글자를 순서·중복 무시하고 세는 방식)으로는
+  // 0.7 이상으로 나와 동일 단지로 오인식되는 사고가 있었다. 바이그램 Dice 계수로 교체.
+  return bigramDice(na,nb);
 }
 // 시/도 정식명칭·구명칭(신/구)을 앱이 쓰는 축약형으로 정규화 — 예: "서울특별시"→"서울", "전북특별자치도"→"전북"
 // (같은 건설사 브랜드명이 여러 지역에 쓰여서 simScore만으로는 "래미안 강남" vs "래미안 강북"처럼
@@ -1449,6 +1459,16 @@ function addrStringMatches(a,b){
 // CSV 실거래가 매칭(processCSV), KB시세 파일로 단지정보/시세 자동입력 등 어디서든 이 우선순위를 따른다.
 // candidates 중에서 name/addr에 해당하는 단지 하나를 찾아 반환(못 찾으면 null).
 function findComplexByAddrOrName(candidates,name,addr){
+  // 주소의 시/도까지는 확실히 알 수 있는 경우, 이름만으로 비교하는 마지막 단계에서는 시/도가
+  // 확실히 다른 후보를 아예 제외한다. (예: 울산 소재 KB시세 파일의 "힐스테이트이스턴베이"가
+  // 경기도에 등록된 "힐스테이트 더 운정1단지"처럼 브랜드명만 같은 다른 지역 단지와 이름 유사도만으로
+  // 오매칭되는 사고를 막기 위함 — processCSV의 regionMatches와 같은 취지)
+  const addrProvince=addr?normProvince((addr.trim().split(/\s+/)[0]||'')):null;
+  const regionOk=cx=>{
+    if(!addrProvince)return true;
+    const cxProvince=normProvince((cx.region||'').split(' ')[0]||'');
+    return !cxProvince||cxProvince===addrProvince;
+  };
   if(addr){
     const hits=candidates.filter(cx=>addrStringMatches(addr,cx.addr));
     if(hits.length===1)return hits[0];
@@ -1461,7 +1481,7 @@ function findComplexByAddrOrName(candidates,name,addr){
   }
   if(name){
     let best=null,bestS=0;
-    candidates.forEach(cx=>{const s=simScore(cx.name,name);if(s>=0.7&&s>bestS){bestS=s;best=cx;}});
+    candidates.filter(regionOk).forEach(cx=>{const s=simScore(cx.name,name);if(s>=0.7&&s>bestS){bestS=s;best=cx;}});
     return best;
   }
   return null;
