@@ -716,22 +716,27 @@
     if (/층/.test(tokens[i]) || /층/.test(tokens[p - 1])) {
       while (tokens[p] && isFloorContinuation(tokens[p])) p++;
     }
-    // "10층(최상층 119동 4,5호, 120동 4,5호, ...)"처럼 층 표기 뒤에 괄호로 묶인 동/호
-    // 부연 설명이 이어지는 표가 있다(실사례: 부산에코델타시티 디에트르 더 퍼스트(28BL) -
-    // 필로티/최상층 등 라인이 갈리는 층에서 동/호를 층 설명 안에 괄호로 붙여 표기). 괄호
-    // 안에 동/호 표기가 섞여 있으면 isDongToken 등이 그걸 별개의 동/호 갱신으로 잘못
-    // 흡수하고, 뒤이어 나오는 진짜 세대수 숫자가 새 층 목록으로 오인되어 세대수가
-    // 유실된다. 특정 키워드가 아니라 "괄호가 아직 안 닫혔다"는 형태적 규칙으로, 열린
-    // 괄호 수만큼 닫힐 때까지는 그 안의 어떤 토큰이든 같은 층 설명의 일부로 계속 흡수한다.
-    var openCount = 0, closeCount = 0;
-    for (var pk = i; pk < p; pk++) {
-      openCount += (tokens[pk].match(/\(/g) || []).length;
-      closeCount += (tokens[pk].match(/\)/g) || []).length;
-    }
-    while (openCount > closeCount && tokens[p]) {
-      openCount += (tokens[p].match(/\(/g) || []).length;
-      closeCount += (tokens[p].match(/\)/g) || []).length;
-      p++;
+    // "10층(최상층 119동 4,5호, 120동 4,5호, ...)"처럼 층 표기 자체에 괄호가 붙어 시작하는
+    // 경우도, "최상층\n(107동 1,4호,\n108동 3호)"처럼 층 표기 다음 토큰부터 새로 괄호가
+    // 열리는 경우도 있다(실사례: 부산에코델타시티 디에트르 더 퍼스트(28BL), 북수원이목지구
+    // 대방 디에트르 더 리체Ⅰ(A4BL) - 같은 층에 동/호가 갈리는 하위 그룹을 괄호로 부연
+    // 설명). 괄호 안에 동/호 표기가 섞여 있으면 isDongToken 등이 그걸 별개의 동/호 갱신으로
+    // 잘못 흡수하고, 뒤이어 나오는 진짜 세대수 숫자가 새 층 목록으로 오인되어 세대수가
+    // 유실된다. 특정 키워드가 아니라 "괄호가 아직 안 닫혔다"는 형태적 규칙으로, 이미 열린
+    // 괄호가 있거나 다음 토큰이 새로 괄호를 열면 닫힐 때까지 그 안의 어떤 토큰이든 같은 층
+    // 설명의 일부로 계속 흡수한다("층" 표기가 있는 경우로 한정해 무관한 문맥의 괄호까지
+    // 잘못 삼키지 않도록 한다).
+    if (/층/.test(tokens[i]) || /층/.test(tokens[p - 1])) {
+      var openCount = 0, closeCount = 0;
+      for (var pk = i; pk < p; pk++) {
+        openCount += (tokens[pk].match(/\(/g) || []).length;
+        closeCount += (tokens[pk].match(/\)/g) || []).length;
+      }
+      while (tokens[p] && (openCount > closeCount || /\(/.test(tokens[p]))) {
+        openCount += (tokens[p].match(/\(/g) || []).length;
+        closeCount += (tokens[p].match(/\)/g) || []).length;
+        p++;
+      }
     }
     return p;
   }
@@ -1201,7 +1206,9 @@
   // (표 제목 전체 문구) 본문 산문 중간에서 우연히 줄 시작과 일치할 위험은 낮다.
   var SECTION_ANCHORS = {
     area: [/[■▣]\s*공급대상\s*(?:및\s*공급규모)?(?!물)/, /^\s*공급대상\s*및\s*면적/m],
-    price: [/[■▣]\s*공급금액\s*및\s*납부일정/, /[■▣]\s*분양가격\s*납부조건\s*등?\s*안내/, /[■▣]\s*공급금액\s*납부조건\s*등?\s*안내/, /^\s*공급대금\s*및\s*납부일정/m],
+    // "■ 공급금액 표"처럼 짧게 줄여 쓰는 문서도 있다(실사례: 북수원이목지구 대방 디에트르
+    // 더 리체Ⅰ(A4BL) - 다른 문서들의 "및 납부일정"/"납부조건 등 안내" 대신 그냥 "표"만 붙음).
+    price: [/[■▣]\s*공급금액\s*및\s*납부일정/, /[■▣]\s*분양가격\s*납부조건\s*등?\s*안내/, /[■▣]\s*공급금액\s*납부조건\s*등?\s*안내/, /[■▣]\s*공급금액\s*표(?![가-힣])/, /^\s*공급대금\s*및\s*납부일정/m],
     balcony: [/[■▣]\s*발코니\s*확장/],
     // "추가"로 시작해 "옵션품목"으로 끝나는 헤딩은 문서마다 그 사이에 들어가는 말이
     // 제각각이다(추가 선택 옵션품목/추가선택 옵션품목/추가선택사항 옵션품목 등 - 실사례:
@@ -1239,6 +1246,48 @@
     return { area: (area + '\n' + recoveredArea).trim(), price: recoveredPrice };
   }
 
+  // "최상층\n(107동 2,3호,\n108동 1,2호)\n4 652,540,196 ..."처럼 층 표기와 그 세대수 숫자
+  // 사이에 괄호로 묶인 동/호 설명이 여러 줄로 줄바꿈되어 끼는 행이 있다(실사례: 북수원이목지구
+  // 대방 디에트르 더 리체Ⅰ(A4BL)). 줄 단위로 RESUME_RE를 검사하면 "최상층"만 있는 줄에는
+  // 세대수 숫자가 없고, 세대수 숫자가 있는 줄에는 "층" 표기가 없어 어느 줄도 매칭되지 않는다.
+  // "층 표기로 시작하지만 같은 줄에 세대수 숫자가 없는" 줄을 만나면, 세대수 숫자가 나올
+  // 때까지(최대 4줄) 뒤이은 줄들을 이어붙여 하나의 논리적 행으로 합친 뒤에 매칭을 시도한다
+  // (괄호 안 문구가 무엇이든 상관없는 형태적 규칙 - 무관한 프로즈까지 잘못 삼키지 않도록
+  // 이어붙이는 줄 수에 상한을 둔다).
+  function mergeWrappedFloorLines(lines, resumeRe) {
+    var floorStartRe = /^[ \t]*(\d+(?:~\d+)?[ \t]*층|기준층|최상층|최하층)/;
+    // resumeRe는 끝에 앵커가 없어 "107동"처럼 괄호 안의 동/호 번호 숫자 하나에도 우연히
+    // 매칭될 수 있다. 괄호로 묶인 부분은 지우고 나서도 여전히 매칭되는지로 재확인해야
+    // "괄호 안 동/호 번호"가 아니라 "괄호 밖 진짜 세대수"에 매칭된 것임을 보장할 수 있다.
+    function matchesResume(s) {
+      if (!resumeRe.test(s)) return false;
+      return resumeRe.test(s.replace(/\([^()]*\)/g, ' '));
+    }
+    var out = [];
+    var i = 0;
+    while (i < lines.length) {
+      var line = lines[i];
+      if (floorStartRe.test(line) && !matchesResume(line)) {
+        var merged = line;
+        // 괄호가 아직 안 닫혔으면(또는 괄호 밖에 아직 진짜 세대수가 안 나왔으면) 계속 이어붙인다.
+        var openCount = (line.match(/\(/g) || []).length;
+        var closeCount = (line.match(/\)/g) || []).length;
+        var j = i + 1;
+        var limit = Math.min(lines.length, i + 5);
+        while (j < limit && (openCount > closeCount || !matchesResume(merged))) {
+          merged += ' ' + lines[j];
+          openCount += (lines[j].match(/\(/g) || []).length;
+          closeCount += (lines[j].match(/\)/g) || []).length;
+          j++;
+        }
+        if (openCount <= closeCount && matchesResume(merged)) { out.push(merged); i = j; continue; }
+      }
+      out.push(line);
+      i++;
+    }
+    return out;
+  }
+
   // 표가 페이지 경계를 넘어가며 pdf.js 재구성 순서상 중간에 안내문(유의사항/청약일정 등)이
   // 여러 개 끼어들어, 뒤쪽 절반의 행(주로 다음 페이지로 넘어간 나머지 주택형들)이 "■ 공급금액
   // 및 납부일정" 제목보다도 뒤로 밀려나는 문서가 있다(실사례: 부산에코델타시티 디에트르 더
@@ -1255,7 +1304,12 @@
   var AREA_TOTAL_ROW_RE = /^[ \t]*합\s*계[ \t]+\d/;
   function repairFragmentedAreaTable(area, price) {
     var before = parseAreaSection(area);
-    if (!before.length) return null; // 전체 누락은 repairMisplacedAreaTable이 담당
+    // area가 통째로 비어 있는 경우(전체 누락)는 보통 repairMisplacedAreaTable이 "(단위 : ㎡...)"
+    // 표기를 앞세워 먼저 처리하지만, 그 표기 자체가 없는 문서도 있다(실사례: 북수원이목지구
+    // 대방 디에트르 더 리체Ⅰ(A4BL) - "■ 공급대상" 제목 뒤에는 유의사항 산문만 있고 실제
+    // 데이터 행은 "(단위: ㎡...)" 표기 없이 price 섹션 쪽(가격표 제목보다도 앞)에 있다). 아래
+    // 로직은 before.length가 0이어도 그대로 동작하므로(찾아낸 행이 있으면 무조건 개선) 굳이
+    // 따로 분기하지 않고 이 함수 하나로 부분/전체 누락을 모두 처리한다.
     var lines = String(price || '').split('\n');
     var extraLines = [];
     var restLines = [];
@@ -1343,7 +1397,7 @@
     // 끊긴 지점 바로 다음이 "새 코드"로 시작한다는 보장이 없다(직전 코드의 나머지 층
     // 행일 수도 있음 - 실사례: 부산 장안지구 59B의 3/4층·기준층). 그래서 코드가 아니라
     // "표가 다시 시작되는 지점"을 층 행 패턴(층 표기 바로 뒤에 숫자가 오는 줄 시작)으로 찾는다.
-    var RESUME_RE = /^[ \t]*(\d+(?:~\d+)?[ \t]*층|기준층)[ \t]+\d/m;
+    var RESUME_RE = /^[ \t]*(\d+(?:~\d+)?[ \t]*층|기준층|최상층|최하층)[ \t]+\d/m;
     var searchText = fullText.slice(priceEndIdx, searchEnd);
     var m = searchText.match(RESUME_RE);
     if (!m || m.index == null) return null;
@@ -1389,8 +1443,12 @@
     // "10층(최상층)"처럼 층 표기 바로 뒤에 괄호 설명이 붙고 나서야 세대수 숫자가 오는
     // 행도 있어(실사례: 위 110C의 마지막 행), 층 표기와 숫자 사이에 괄호 설명이 끼는 것도
     // 허용한다(숫자가 아닌 문자는 몇 글자든 허용 - 특정 괄호 문구를 나열하지 않는 형태적 일반화).
-    var RESUME_RE = /^[ \t]*(\d+(?:~\d+)?[ \t]*층|기준층)[^\d\n]*\d/;
-    var lines = fullText.slice(priceEndIdx, searchEnd).split('\n');
+    // "최상층"/"최하층"은 숫자 접두부 없이 단독으로 층 구분에 쓰이는 표(실사례: 북수원이목지구
+    // 대방 디에트르 더 리체Ⅰ(A4BL) - "최상층 12 ..."처럼 층수 숫자 없이 이 단어 자체가 층
+    // 구분값). 본문 토크나이저(isFloorToken)는 이미 "층"이 포함되면 무엇이든 층 토큰으로
+    // 인정하므로, 복구용 정규식도 같은 관대함으로 맞춘다.
+    var RESUME_RE = /^[ \t]*(\d+(?:~\d+)?[ \t]*층|기준층|최상층|최하층)[^\d\n]*\d/;
+    var lines = mergeWrappedFloorLines(fullText.slice(priceEndIdx, searchEnd).split('\n'), RESUME_RE);
     var extraLines = lines.filter(function (line) { return RESUME_RE.test(line); });
     if (!extraLines.length) return null;
 
