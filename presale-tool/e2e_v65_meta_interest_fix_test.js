@@ -69,23 +69,24 @@ async function main() {
 
   check('M03', '오픈일이 엑셀에도 반영됨', ws.getCell('A4').value === '오픈일 : 2025.08.18');
 
-  // 84A 4~5층 행(8행) - 실제 중도금 1차 383,600,000원(2025-10-30, 306일)/2차 95,900,000원
-  // (2025-12-30, 245일), 금리 5% 기준. 열 오프셋 버그 수정 전에는 BD(56)/BE(57)에 값이
+  // 84A 4~5층 행(8행) - 실제 중도금 1차 383,600,000원(2025-10-30)/2차 95,900,000원
+  // (2025-12-30), 금리 5% 기준. 열 오프셋 버그 수정 전에는 BD(56)/BE(57)에 값이
   // 어긋나 있었고, 원금도 항상 "분양가*10%"로 잘못 가정했다.
-  // (중도금 이자 계산 표는 계약일차/청약일정 등 열 삭제 후 AE~AL 위치로 이동했다.)
-  check('M04', '금리(AE6)가 헤더 행에 정상 기록(이전엔 본문 회차 이자 수식이 이 칸을 침범)', ws.getCell('AE6').value === 0.05);
-  check('M05', '1차 중도금 날짜(AF6)/일수(AF7) 정상 기록', ws.getCell('AF6').value instanceof Date && ws.getCell('AF7').value === 306);
-  check('M06', '2차 중도금 날짜(AG6)/일수(AG7) 정상 기록(3차 이후는 빈 칸)',
-    ws.getCell('AG6').value instanceof Date && ws.getCell('AG7').value === 245 && ws.getCell('AH6').value == null);
+  // (중도금 이자 계산 표는 22차에서 청약 현황 블록이 통째로 삭제되며 V~AC 위치로
+  // 다시 이동했고, 회차별 일수도 하드코딩 숫자 대신 "입주일-회차날짜" 실시간 수식이 됐다.)
+  check('M04', '금리(V6)가 헤더 행에 정상 기록(이전엔 본문 회차 이자 수식이 이 칸을 침범)', ws.getCell('V6').value === 0.05);
+  check('M05', '1차 중도금 날짜(W6) 정상 기록 + 일수(W7)가 실시간 수식', ws.getCell('W6').value instanceof Date && ws.getCell('W7').value.formula === '$AC$6-W6');
+  check('M06', '2차 중도금 날짜(X6) 정상 기록(3차 이후는 빈 칸)',
+    ws.getCell('X6').value instanceof Date && ws.getCell('Y6').value == null);
 
-  const beFormula = ws.getCell('AF8').value && ws.getCell('AF8').value.formula;
-  const bfFormula = ws.getCell('AG8').value && ws.getCell('AG8').value.formula;
-  check('M07', '1차 중도금 이자 수식이 실제 원금(383,600,000, 분양가의 10% 가정이 아님)과 자기 날짜(AF$7)를 정확히 참조',
-    beFormula === '(383600000*$AE$6)*(AF$7/365)');
-  check('M08', '2차 중도금 이자 수식이 실제 원금(95,900,000)과 자기 날짜(AG$7)를 정확히 참조(더 이상 한 칸씩 밀리지 않음)',
-    bfFormula === '(95900000*$AE$6)*(AG$7/365)');
+  const beFormula = ws.getCell('W8').value && ws.getCell('W8').value.formula;
+  const bfFormula = ws.getCell('X8').value && ws.getCell('X8').value.formula;
+  check('M07', '1차 중도금 이자 수식이 실제 원금(383,600,000, 분양가의 10% 가정이 아님)과 자기 날짜(W$7)를 정확히 참조',
+    beFormula === '(383600000*$V$6)*(W$7/365)');
+  check('M08', '2차 중도금 이자 수식이 실제 원금(95,900,000)과 자기 날짜(X$7)를 정확히 참조(더 이상 한 칸씩 밀리지 않음)',
+    bfFormula === '(95900000*$V$6)*(X$7/365)');
   check('M09', '중도금 2회뿐인 문서도 이자가 0으로 버려지지 않음(6회 미만이면 통째로 무시하던 버그 수정)',
-    ws.getCell('AF8').value.formula !== '(0*$AE$6)*(AF$7/365)');
+    ws.getCell('W8').value.formula !== '(0*$V$6)*(W$7/365)');
 
   console.log(`[e2e_v65_meta_interest_fix_test.js] ${pass}/${pass + fail} 통과`);
   if (errors.length) { console.log('--- 브라우저 에러 ---'); errors.forEach((e) => console.log(e)); }

@@ -106,9 +106,11 @@ async function main() {
   fs.unlinkSync(savePath);
   const ws = wb.worksheets[0];
 
-  const af8 = ws.getCell('AF8').value;
+  // 22차: 중도금 이자 계산 표가 청약 현황 블록 삭제로 V(금리)~AC(입주) 위치로 옮겨졌다
+  // (1차 회차 날짜/이자 칸은 W).
+  const w8 = ws.getCell('W8').value;
   check('U05', '이자후불제 단지의 엑셀 중도금 이자 수식이 0이 아닌 실제 원금을 참조함(수정 전엔 저장 후 전부 0으로 빠짐)',
-    af8 && af8.formula && !af8.formula.startsWith('(0*'));
+    w8 && w8.formula && !w8.formula.startsWith('(0*'));
 
   console.log(`[e2e_v65_summary_interest_fix_test.js] ${pass}/${pass + fail} 통과`);
   if (errors.length) { console.log('--- 브라우저 에러 ---'); errors.forEach((e) => console.log(e)); }
