@@ -217,6 +217,19 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   // "이 값이 몇 토큰 뒤 전용면적 데이터로 그대로 반복 등장하는지"를 검증한 것만 인정한다.
   var BARE_LONG_CODE_RE = /^\d{2,3}\.\d{2,4}$/;
 
+  // 공급면적표는 "약식표기(84A)"와 "긴 코드(084.9944A)"를 나란히 표기하지만, 공급금액표는
+  // 짧은 약식표기 없이 긴 코드만으로 주택형을 구분하는 문서가 있다(실사례: 부산에코델타시티
+  // 디에트르 더 퍼스트(28BL) - 공급면적표는 "약식표기" 칸이 있지만 공급금액표는 "084.9944A"
+  // 처럼 긴 코드로만 표기). 이때 area 섹션에서 넘어온 codeSet(약식표기 목록)만으로 코드를
+  // 매칭하면 공급금액표의 행을 하나도 못 찾는다. 긴 코드의 소수점 앞 정수부(앞자리 0 제거)에
+  // 말미 문자를 그대로 붙이면 약식표기와 정확히 같아지는 산술적 관계("084"→84, "110"→110)를
+  // 이용해, 헤더 문구가 아니라 숫자 자체의 변환으로 별칭을 판별한다.
+  function longCodeToShortCandidate(tok) {
+    var m = /^(\d{2,3})\.(\d{2,4})([A-Za-z]{1,2})$/.exec(String(tok || ''));
+    if (!m) return null;
+    return String(Number(m[1])) + m[3];
+  }
+
   // BARE_LONG_CODE_RE에 매칭된 토큰이 실제 "관리코드"(전용면적을 소수점 자릿수만 다르게 그대로
   // 반복 표기, 예: "036.9653" → 몇 토큰 뒤 "36.9653")인지, 우연히 그 값 그대로인 일반 면적
   // 데이터값(주거공용/계약면적 등, 값이 서로 겹치지 않는 게 보통)인지를 자기참조 중복으로
@@ -493,6 +506,26 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     if (!boundaries.length) {
       for (var i2 = 0; i2 < tokens.length; i2++) if (LONG_CODE_RE.test(tokens[i2])) boundaries.push(i2);
     }
+
+    // 같은 코드가 경계 후보로 두 번 이상 잡히는 문서가 있다(실사례: 부산에코델타시티 디에트르
+    // 더 퍼스트 - 실제 데이터 표 뒤에 "■ 주택형 표시 안내"라는 코드만 다시 나열하는 매핑 표가
+    // 있어 "84A 84B 84C ..."가 한 번 더 경계로 잡힌다). 매핑 표의 코드 나열은 뒤에 다시 코드(가
+    // 아니면 아무 소수 면적값도 없이) 이어지지만, 실제 데이터 행은 항상 코드 바로 뒤에 소수
+    // 면적값이 온다는 구조적 차이로 실제 데이터 행만 남긴다(해당 코드에 그런 occurrence가 하나도
+    // 없으면 판단 근거가 없으므로 원래대로 전부 남겨 안전하게 후퇴한다).
+    var boundariesByCode = {};
+    boundaries.forEach(function (idx) { var c = tokens[idx]; (boundariesByCode[c] = boundariesByCode[c] || []).push(idx); });
+    Object.keys(boundariesByCode).forEach(function (c) {
+      var occ = boundariesByCode[c];
+      if (occ.length < 2) return;
+      var withFloatNext = occ.filter(function (idx) { return /^\d+\.\d+$/.test(tokens[idx + 1] || ''); });
+      if (withFloatNext.length && withFloatNext.length < occ.length) {
+        var keep = {};
+        withFloatNext.forEach(function (idx) { keep[idx] = true; });
+        boundaries = boundaries.filter(function (idx) { return tokens[idx] !== c || keep[idx]; });
+      }
+    });
+
     // 레터 접미사형(59A 등)과 무접미사 관리코드형(036.9653 등)이 한 표 안에 섞여 있는 문서 대응:
     // 자기참조 검증을 통과한 무접미사 경계도 추가로 합친다(둘 다 없거나 둘 다 있어도 안전).
     var bareBoundaries = findSelfConsistentBareCodeBoundaries(tokens);
@@ -843,6 +876,28 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     if (/층/.test(tokens[i]) || /층/.test(tokens[p - 1])) {
       while (tokens[p] && isFloorContinuation(tokens[p])) p++;
     }
+    // "10층(최상층 119동 4,5호, 120동 4,5호, ...)"처럼 층 표기 자체에 괄호가 붙어 시작하는
+    // 경우도, "최상층\n(107동 1,4호,\n108동 3호)"처럼 층 표기 다음 토큰부터 새로 괄호가
+    // 열리는 경우도 있다(실사례: 부산에코델타시티 디에트르 더 퍼스트(28BL), 북수원이목지구
+    // 대방 디에트르 더 리체Ⅰ(A4BL) - 같은 층에 동/호가 갈리는 하위 그룹을 괄호로 부연
+    // 설명). 괄호 안에 동/호 표기가 섞여 있으면 isDongToken 등이 그걸 별개의 동/호 갱신으로
+    // 잘못 흡수하고, 뒤이어 나오는 진짜 세대수 숫자가 새 층 목록으로 오인되어 세대수가
+    // 유실된다. 특정 키워드가 아니라 "괄호가 아직 안 닫혔다"는 형태적 규칙으로, 이미 열린
+    // 괄호가 있거나 다음 토큰이 새로 괄호를 열면 닫힐 때까지 그 안의 어떤 토큰이든 같은 층
+    // 설명의 일부로 계속 흡수한다("층" 표기가 있는 경우로 한정해 무관한 문맥의 괄호까지
+    // 잘못 삼키지 않도록 한다).
+    if (/층/.test(tokens[i]) || /층/.test(tokens[p - 1])) {
+      var openCount = 0, closeCount = 0;
+      for (var pk = i; pk < p; pk++) {
+        openCount += (tokens[pk].match(/\(/g) || []).length;
+        closeCount += (tokens[pk].match(/\)/g) || []).length;
+      }
+      while (tokens[p] && (openCount > closeCount || /\(/.test(tokens[p]))) {
+        openCount += (tokens[p].match(/\(/g) || []).length;
+        closeCount += (tokens[p].match(/\)/g) || []).length;
+        p++;
+      }
+    }
     return p;
   }
 
@@ -908,13 +963,39 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     while (i < n) {
       var tok = tokens[i];
 
-      var isCode = codeSet ? (codeSet.indexOf(tok) !== -1) : (SHORT_CODE_RE.test(tok) || LONG_CODE_RE.test(tok));
-      if (isCode) { currentCode = tok; currentDong = ''; currentFloorRaw = null; lastDongIdx = -1; i++; continue; }
+      var resolvedCode = null;
+      if (codeSet) {
+        if (codeSet.indexOf(tok) !== -1) resolvedCode = tok;
+        else {
+          var aliasCandidate = longCodeToShortCandidate(tok);
+          if (aliasCandidate && codeSet.indexOf(aliasCandidate) !== -1) resolvedCode = aliasCandidate;
+        }
+      } else if (SHORT_CODE_RE.test(tok) || LONG_CODE_RE.test(tok)) {
+        resolvedCode = tok;
+      }
+      if (resolvedCode) { currentCode = resolvedCode; currentDong = ''; currentFloorRaw = null; lastDongIdx = -1; i++; continue; }
 
       if (isDongToken(tok) || (lastDongIdx === i - 1 && isDongContinuationToken(tok))) {
         currentDong = (lastDongIdx === i - 1) ? (currentDong + ' ' + tok) : tok;
         lastDongIdx = i;
         i++; continue;
+      }
+
+      // "1층 (동/호 목록1) 4 ... / (동/호 목록2) 10 ..."처럼 같은 층에 동/호 그룹만 다르고
+      // 층 표기 자체는 반복되지 않는 두 번째 이후 행이 있다(실사례: 북수원이목지구 대방
+      // 디에트르 더 리체Ⅱ(A3BL) - 동/호 목록이 페이지 경계를 넘어가며 재구성 순서가 흐트러져
+      // 세대수 숫자 "10"만 덩그러니 남는다). 이런 순수 숫자 하나는 "새 층 목록"의 시작으로도
+      // 보일 수 있어(아래 isFloorToken 분기의 순수숫자 폴백) 형태만으로는 구분이 안 되지만,
+      // "바로 직전 토큰이 동/호 목록의 일부였다"는 문맥 신호가 있으면 그 동/호 그룹의
+      // 세대수일 가능성이 훨씬 높다. 이 토큰 자체를 세대수로 삼아 바로 뒤에 colMap 개수만큼
+      // 금액이 오는지 먼저 시도해보고, 성공하면 직전 층을 그대로 이어받는다.
+      if (/^\d+$/.test(tok) && currentCode && currentFloorRaw != null && lastDongIdx === i - 1) {
+        var rCont = readMoneyRun(tokens, i, colMap, unit_mult);
+        if (rCont) {
+          pushRow(currentFloorRaw, rCont);
+          i = rCont.nextIndex;
+          continue;
+        }
       }
 
       if (isFloorToken(tok) && currentCode) {
@@ -1080,8 +1161,20 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       }
 
       if (codesHere.length) {
+        // 표가 페이지 경계를 넘어가며 "타입 항목 위치 품목명 옵션금액 비고사항" 헤더 행이
+        // 다시 인쇄되고 그 바로 뒤에 코드가 한 번 더 나오는 문서가 있다(실사례: 북수원이목지구
+        // 대방 디에트르 더 리체Ⅱ(A3BL) - "84B" 카탈로그가 페이지 경계에서 끊기고 다음 페이지에
+        // "84BP"가 헤더 재인쇄 직후 다시 나온다). 이건 새 타입으로의 전환이 아니라 직전
+        // 카탈로그가 페이지를 넘어 계속된다는 신호이므로("비고사항"/"비고"로 끝나는 표 헤더
+        // 직후라는 형태적 특징으로 판별), 새 그룹을 시작하는 대신 직전 그룹의 코드 목록에
+        // 추가해 이후 항목들이 두 코드 모두에 반영되게 한다.
+        var isHeaderRepeatCode = groups.length && /^(비고사항|비고)$/.test(tokens[i - 1] || '') &&
+          codesHere.every(function (c) { return groups[groups.length - 1].codes.indexOf(c) === -1; });
         if (current && current.startedByCode && current.firstMoney === null) {
           current.codes = current.codes.concat(codesHere);
+        } else if (isHeaderRepeatCode) {
+          groups[groups.length - 1].codes = groups[groups.length - 1].codes.concat(codesHere);
+          current = groups[groups.length - 1];
         } else {
           current = { codes: codesHere.slice(), firstMoney: null, startedByCode: true };
           groups.push(current);
@@ -1302,9 +1395,19 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   // (표 제목 전체 문구) 본문 산문 중간에서 우연히 줄 시작과 일치할 위험은 낮다.
   var SECTION_ANCHORS = {
     area: [/[■▣]\s*공급대상\s*(?:및\s*공급규모)?(?!물)/, /^\s*공급대상\s*및\s*면적/m],
-    price: [/[■▣]\s*공급금액\s*및\s*납부일정/, /[■▣]\s*분양가격\s*납부조건\s*등?\s*안내/, /[■▣]\s*공급금액\s*납부조건\s*등?\s*안내/, /^\s*공급대금\s*및\s*납부일정/m],
+    // "■ 공급금액 표"처럼 짧게 줄여 쓰는 문서도 있다(실사례: 북수원이목지구 대방 디에트르
+    // 더 리체Ⅰ(A4BL) - 다른 문서들의 "및 납부일정"/"납부조건 등 안내" 대신 그냥 "표"만 붙음).
+    price: [/[■▣]\s*공급금액\s*및\s*납부일정/, /[■▣]\s*분양가격\s*납부조건\s*등?\s*안내/, /[■▣]\s*공급금액\s*납부조건\s*등?\s*안내/, /[■▣]\s*공급금액\s*표(?![가-힣])/, /^\s*공급대금\s*및\s*납부일정/m],
     balcony: [/[■▣]\s*발코니\s*확장/],
-    option: [/[■▣]\s*추가\s*선택\s*옵션품목/, /[■▣]\s*추가선택\s*옵션품목/, /[■▣]\s*옵션품목/, /[■▣]\s*별도계약\s*[-–]\s*추가\s*선택품목/, /[■▣]\s*추가\s*선택품목/]
+    // "추가"로 시작해 "옵션품목"으로 끝나는 헤딩은 문서마다 그 사이에 들어가는 말이
+    // 제각각이다(추가 선택 옵션품목/추가선택 옵션품목/추가선택사항 옵션품목 등 - 실사례:
+    // 부산에코델타시티 디에트르 더 퍼스트는 "추가선택사항 옵션품목"이라 "사항"이 끼어
+    // 있어 기존의 키워드 나열식 패턴 어디에도 걸리지 않았다). 키워드를 하나씩 추가하는
+    // 대신 "■/▣ 바로 뒤 추가 + (순수 한글/공백 몇 글자) + 옵션품목" 형태 자체를 앵커로
+    // 삼아 일반화한다 - 사이 구간을 순수 한글/공백 6자 이내로 제한해 본문 산문 속
+    // 우연한 재언급(예: "▣ 시스템 에어컨 및 추가선택사항 옵션품목"은 ■/▣ 바로 뒤가
+    // "추가"가 아니라 "시스템"이라 애초에 매칭되지 않는다)까지 잘못 앵커로 삼는 일은 없다.
+    option: [/[■▣]\s*추가[\s가-힣]{0,6}옵션품목/, /[■▣]\s*옵션품목/, /[■▣]\s*별도계약\s*[-–]\s*추가\s*선택품목/, /[■▣]\s*추가\s*선택품목/]
   };
   var NEXT_MAJOR_SECTION_RE = /청약신청\s*자격\s*및\s*공급일정/;
 
@@ -1330,6 +1433,102 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     var recoveredPrice = price.slice(priceMarkerIdx).trim();
     if (!parseAreaSection(recoveredArea).length) return null;
     return { area: (area + '\n' + recoveredArea).trim(), price: recoveredPrice };
+  }
+
+  // "최상층\n(107동 2,3호,\n108동 1,2호)\n4 652,540,196 ..."처럼 층 표기와 그 세대수 숫자
+  // 사이에 괄호로 묶인 동/호 설명이 여러 줄로 줄바꿈되어 끼는 행이 있다(실사례: 북수원이목지구
+  // 대방 디에트르 더 리체Ⅰ(A4BL)). 줄 단위로 RESUME_RE를 검사하면 "최상층"만 있는 줄에는
+  // 세대수 숫자가 없고, 세대수 숫자가 있는 줄에는 "층" 표기가 없어 어느 줄도 매칭되지 않는다.
+  // "층 표기로 시작하지만 같은 줄에 세대수 숫자가 없는" 줄을 만나면, 세대수 숫자가 나올
+  // 때까지(최대 4줄) 뒤이은 줄들을 이어붙여 하나의 논리적 행으로 합친 뒤에 매칭을 시도한다
+  // (괄호 안 문구가 무엇이든 상관없는 형태적 규칙 - 무관한 프로즈까지 잘못 삼키지 않도록
+  // 이어붙이는 줄 수에 상한을 둔다).
+  function mergeWrappedFloorLines(lines, resumeRe) {
+    var floorStartRe = /^[ \t]*(\d+(?:~\d+)?[ \t]*층|기준층|최상층|최하층)/;
+    // resumeRe는 끝에 앵커가 없어 "107동"처럼 괄호 안의 동/호 번호 숫자 하나에도 우연히
+    // 매칭될 수 있다. 괄호로 묶인 부분은 지우고 나서도 여전히 매칭되는지로 재확인해야
+    // "괄호 안 동/호 번호"가 아니라 "괄호 밖 진짜 세대수"에 매칭된 것임을 보장할 수 있다.
+    function matchesResume(s) {
+      if (!resumeRe.test(s)) return false;
+      return resumeRe.test(s.replace(/\([^()]*\)/g, ' '));
+    }
+    var out = [];
+    var i = 0;
+    while (i < lines.length) {
+      var line = lines[i];
+      if (floorStartRe.test(line) && !matchesResume(line)) {
+        var merged = line;
+        // 괄호가 아직 안 닫혔으면(또는 괄호 밖에 아직 진짜 세대수가 안 나왔으면) 계속 이어붙인다.
+        var openCount = (line.match(/\(/g) || []).length;
+        var closeCount = (line.match(/\)/g) || []).length;
+        var j = i + 1;
+        var limit = Math.min(lines.length, i + 5);
+        while (j < limit && (openCount > closeCount || !matchesResume(merged))) {
+          merged += ' ' + lines[j];
+          openCount += (lines[j].match(/\(/g) || []).length;
+          closeCount += (lines[j].match(/\)/g) || []).length;
+          j++;
+        }
+        if (openCount <= closeCount && matchesResume(merged)) { out.push(merged); i = j; continue; }
+      }
+      out.push(line);
+      i++;
+    }
+    return out;
+  }
+
+  // 표가 페이지 경계를 넘어가며 pdf.js 재구성 순서상 중간에 안내문(유의사항/청약일정 등)이
+  // 여러 개 끼어들어, 뒤쪽 절반의 행(주로 다음 페이지로 넘어간 나머지 주택형들)이 "■ 공급금액
+  // 및 납부일정" 제목보다도 뒤로 밀려나는 문서가 있다(실사례: 부산에코델타시티 디에트르 더
+  // 퍼스트(28BL) - 공급대상 표가 84A/84B 두 행만 area 섹션에 남고, 84C/110A/110B/110C 네 행은
+  // price 섹션 앞부분(가격표 제목보다도 앞)에 끼어 들어간다). repairMisplacedAreaTable은 area가
+  // "통째로 비어 있을 때"만 동작하므로 이런 "일부만 누락"에는 대응하지 못한다. 헤더 키워드가
+  // 아니라 "행 번호 + 긴 코드(NNN.NNNN + 문자)로 시작하는 행"이라는 공급대상 표 행 특유의
+  // 구조를 앵커로 삼아 price 섹션 텍스트 안에서 찾아 이어붙인다. 실제로 새 코드를 더 찾아낼
+  // 때만 채택한다(명시적 실패가 조용한 오염보다 안전하다는 원칙 유지).
+  var AREA_ROW_RESUME_RE = /^[ \t]*\d{1,2}[ \t]+\d{2,3}\.\d{2,4}[A-Za-z]{1,2}[ \t]+\S+[ \t]+\d/;
+  // 이어붙인 마지막 데이터 행 바로 뒤에 "합계" 총계 행이 붙어 있는 경우, 그 행도 함께
+  // 옮겨야 마지막 코드(예: 110C)의 세그먼트가 총계 행에서 정상적으로 끊긴다(안 그러면
+  // 그 뒤 유의사항 산문·매핑 표까지 세그먼트가 삼켜 세대수가 오염된다).
+  var AREA_TOTAL_ROW_RE = /^[ \t]*합\s*계[ \t]+\d/;
+  function repairFragmentedAreaTable(area, price) {
+    var before = parseAreaSection(area);
+    // area가 통째로 비어 있는 경우(전체 누락)는 보통 repairMisplacedAreaTable이 "(단위 : ㎡...)"
+    // 표기를 앞세워 먼저 처리하지만, 그 표기 자체가 없는 문서도 있다(실사례: 북수원이목지구
+    // 대방 디에트르 더 리체Ⅰ(A4BL) - "■ 공급대상" 제목 뒤에는 유의사항 산문만 있고 실제
+    // 데이터 행은 "(단위: ㎡...)" 표기 없이 price 섹션 쪽(가격표 제목보다도 앞)에 있다). 아래
+    // 로직은 before.length가 0이어도 그대로 동작하므로(찾아낸 행이 있으면 무조건 개선) 굳이
+    // 따로 분기하지 않고 이 함수 하나로 부분/전체 누락을 모두 처리한다.
+    var lines = String(price || '').split('\n');
+    var extraLines = [];
+    var restLines = [];
+    var lastMatchIdx = -1;
+    lines.forEach(function (line, idx) {
+      if (AREA_ROW_RESUME_RE.test(line)) { extraLines.push(line); lastMatchIdx = idx; }
+      else restLines.push(line);
+    });
+    if (!extraLines.length) return null;
+    // 마지막으로 옮긴 데이터 행 바로 다음 줄이 총계 행이면 함께 옮긴다.
+    if (lastMatchIdx >= 0 && lastMatchIdx + 1 < lines.length && AREA_TOTAL_ROW_RE.test(lines[lastMatchIdx + 1])) {
+      extraLines.push(lines[lastMatchIdx + 1]);
+      var totalLineIdx = restLines.indexOf(lines[lastMatchIdx + 1]);
+      if (totalLineIdx !== -1) restLines.splice(totalLineIdx, 1);
+    }
+    // 되찾은 행을 area 텍스트 맨 끝(유의사항 산문·"주택형 표시 안내" 매핑 표 등을 다 지난
+    // 뒤)에 붙이면, 원래 있던 마지막 실제 데이터 행(예: 84B)의 세그먼트가 다음 경계를 만나지
+    // 못하고 그 산문·매핑 표 전체를 삼켜버려 세대수 등이 엉뚱한 값으로 오염된다(실사례로 확인).
+    // 표가 원래 있어야 할 자리, 즉 마지막 데이터 행 바로 뒤(그 다음에 오는 "■/▣" 안내문
+    // 제목 직전)에 끼워 넣어야 세그먼트 경계가 정상적으로 이어진다.
+    var insertAt = findNextHeadingBoundary(area, 0);
+    var merged = insertAt > 0
+      ? (area.slice(0, insertAt).replace(/\s+$/, '') + '\n' + extraLines.join('\n') + '\n' + area.slice(insertAt)).trim()
+      : (area + '\n' + extraLines.join('\n')).trim();
+    var after = parseAreaSection(merged);
+    var beforeCodes = {};
+    before.forEach(function (a) { beforeCodes[a.code] = true; });
+    var gained = after.filter(function (a) { return !beforeCodes[a.code]; }).length;
+    if (!gained || after.length <= before.length) return null; // 개선이 없으면 조용히 포기
+    return { area: merged, price: restLines.join('\n').trim() };
   }
 
   function findEarliestMatch(text, patterns, fromIndex) {
@@ -1387,7 +1586,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     // 끊긴 지점 바로 다음이 "새 코드"로 시작한다는 보장이 없다(직전 코드의 나머지 층
     // 행일 수도 있음 - 실사례: 부산 장안지구 59B의 3/4층·기준층). 그래서 코드가 아니라
     // "표가 다시 시작되는 지점"을 층 행 패턴(층 표기 바로 뒤에 숫자가 오는 줄 시작)으로 찾는다.
-    var RESUME_RE = /^[ \t]*(\d+(?:~\d+)?[ \t]*층|기준층)[ \t]+\d/m;
+    var RESUME_RE = /^[ \t]*(\d+(?:~\d+)?[ \t]*층|기준층|최상층|최하층)[ \t]+\d/m;
     var searchText = fullText.slice(priceEndIdx, searchEnd);
     var m = searchText.match(RESUME_RE);
     if (!m || m.index == null) return null;
@@ -1406,6 +1605,52 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     var beforeMissing = areaCodes.filter(function (c) { return !seenBefore[c]; }).length;
     var afterMissing = areaCodes.filter(function (c) { return !seenAfter[c]; }).length;
     if (afterMissing > beforeMissing) return null; // 코드 커버리지가 오히려 나빠지면 포기
+    return merged;
+  }
+
+  // repairFragmentedPriceTable은 "코드가 통째로 한 건도 안 잡힌" 경우만 복구한다. 하지만
+  // 코드 자체는 이미 일부 행을 찾았지만, 표가 여러 페이지에 걸쳐 있어 그 중 일부 행 뭉치만
+  // "■ 공통 유의사항" 같은 긴 안내문 뒤로 밀려나 있는 문서가 있다(실사례: 부산에코델타시티
+  // 디에트르 더 퍼스트(28BL) - 110C 타입의 마지막 4개 층(3~10층) 행이 안내문 산문 뒤로
+  // 흩어져 있는데, 110C 자체는 이미 앞부분 행을 찾았으므로 위 함수가 손대지 않는다). "코드별
+  // 행 세대수 합계가 공급대상표의 총공급세대수와 일치하는가"라는 산술 관계로 미달을 판별하고,
+  // 부족한 만큼 층 행 패턴을 범위 안에서 모두 찾아 이어붙인다. 이어붙인 뒤에도 어느 코드의
+  // 합계가 표기 세대수를 초과하면(엉뚱한 표의 행을 잘못 주워왔다는 신호) 조용히 포기한다.
+  function repairUndercountedPriceRows(fullText, priceText, priceEndIdx, areaTypes, boundIdx) {
+    if (!areaTypes || !areaTypes.length || priceEndIdx < 0 || priceEndIdx >= fullText.length) return null;
+    var codes = areaTypes.map(function (a) { return a.code; });
+    var unitsByCode = {};
+    areaTypes.forEach(function (a) { unitsByCode[a.code] = a.supply_units; });
+    var before = parsePriceSection(priceText, codes).priceRows;
+    var sumBefore = {};
+    before.forEach(function (r) { sumBefore[r.code] = (sumBefore[r.code] || 0) + (r.units || 0); });
+    var shortCodes = codes.filter(function (c) { return isFinite(unitsByCode[c]) && (sumBefore[c] || 0) < unitsByCode[c]; });
+    if (!shortCodes.length) return null;
+
+    var searchEnd = (boundIdx != null && boundIdx >= 0) ? boundIdx : fullText.length;
+    if (searchEnd <= priceEndIdx) return null;
+    // "10층(최상층)"처럼 층 표기 바로 뒤에 괄호 설명이 붙고 나서야 세대수 숫자가 오는
+    // 행도 있어(실사례: 위 110C의 마지막 행), 층 표기와 숫자 사이에 괄호 설명이 끼는 것도
+    // 허용한다(숫자가 아닌 문자는 몇 글자든 허용 - 특정 괄호 문구를 나열하지 않는 형태적 일반화).
+    // "최상층"/"최하층"은 숫자 접두부 없이 단독으로 층 구분에 쓰이는 표(실사례: 북수원이목지구
+    // 대방 디에트르 더 리체Ⅰ(A4BL) - "최상층 12 ..."처럼 층수 숫자 없이 이 단어 자체가 층
+    // 구분값). 본문 토크나이저(isFloorToken)는 이미 "층"이 포함되면 무엇이든 층 토큰으로
+    // 인정하므로, 복구용 정규식도 같은 관대함으로 맞춘다.
+    var RESUME_RE = /^[ \t]*(\d+(?:~\d+)?[ \t]*층|기준층|최상층|최하층)[^\d\n]*\d/;
+    var lines = mergeWrappedFloorLines(fullText.slice(priceEndIdx, searchEnd).split('\n'), RESUME_RE);
+    var extraLines = lines.filter(function (line) { return RESUME_RE.test(line); });
+    if (!extraLines.length) return null;
+
+    var merged = (priceText + '\n' + extraLines.join('\n')).trim();
+    var after = parsePriceSection(merged, codes).priceRows;
+    if (after.length <= before.length) return null;
+    var sumAfter = {};
+    after.forEach(function (r) { sumAfter[r.code] = (sumAfter[r.code] || 0) + (r.units || 0); });
+    // 어느 코드든 합계가 표기 세대수를 초과하면 엉뚱한 행을 잘못 주워왔다는 신호이므로 포기한다.
+    var overshoot = codes.some(function (c) { return isFinite(unitsByCode[c]) && (sumAfter[c] || 0) > unitsByCode[c]; });
+    if (overshoot) return null;
+    var improved = shortCodes.some(function (c) { return (sumAfter[c] || 0) > (sumBefore[c] || 0); });
+    if (!improved) return null; // 개선이 없으면 조용히 포기(명시적 실패 유지)
     return merged;
   }
 
@@ -1534,10 +1779,13 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     if (areaStart >= 0 && priceStart >= 0) {
       var repaired = repairMisplacedAreaTable(area, price);
       if (repaired) { area = repaired.area; price = repaired.price; }
+      var repairedFrag = repairFragmentedAreaTable(area, price);
+      if (repairedFrag) { area = repairedFrag.area; price = repairedFrag.price; }
     }
 
     if (areaStart >= 0 && priceStart >= 0) {
-      var areaCodes = parseAreaSection(area).map(function (a) { return a.code; });
+      var areaTypesForRepair = parseAreaSection(area);
+      var areaCodes = areaTypesForRepair.map(function (a) { return a.code; });
       var firstPositive = function () {
         var best = -1;
         for (var i = 0; i < arguments.length; i++) {
@@ -1549,6 +1797,8 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       var priceRepairBound = firstPositive(balconyStart, optionStart, nextMajorStart);
       var priceRepaired = repairFragmentedPriceTable(text, price, priceEndIdx, areaCodes, priceRepairBound);
       if (priceRepaired) { price = priceRepaired; }
+      var priceRepaired2 = repairUndercountedPriceRows(text, price, priceEndIdx, areaTypesForRepair, priceRepairBound);
+      if (priceRepaired2) { price = priceRepaired2; }
 
       if (balconyStart >= 0) {
         var balconyRepairBound = firstPositive(optionStart, nextMajorStart);

@@ -821,6 +821,23 @@
         i++; continue;
       }
 
+      // "1층 (동/호 목록1) 4 ... / (동/호 목록2) 10 ..."처럼 같은 층에 동/호 그룹만 다르고
+      // 층 표기 자체는 반복되지 않는 두 번째 이후 행이 있다(실사례: 북수원이목지구 대방
+      // 디에트르 더 리체Ⅱ(A3BL) - 동/호 목록이 페이지 경계를 넘어가며 재구성 순서가 흐트러져
+      // 세대수 숫자 "10"만 덩그러니 남는다). 이런 순수 숫자 하나는 "새 층 목록"의 시작으로도
+      // 보일 수 있어(아래 isFloorToken 분기의 순수숫자 폴백) 형태만으로는 구분이 안 되지만,
+      // "바로 직전 토큰이 동/호 목록의 일부였다"는 문맥 신호가 있으면 그 동/호 그룹의
+      // 세대수일 가능성이 훨씬 높다. 이 토큰 자체를 세대수로 삼아 바로 뒤에 colMap 개수만큼
+      // 금액이 오는지 먼저 시도해보고, 성공하면 직전 층을 그대로 이어받는다.
+      if (/^\d+$/.test(tok) && currentCode && currentFloorRaw != null && lastDongIdx === i - 1) {
+        var rCont = readMoneyRun(tokens, i, colMap, unit_mult);
+        if (rCont) {
+          pushRow(currentFloorRaw, rCont);
+          i = rCont.nextIndex;
+          continue;
+        }
+      }
+
       if (isFloorToken(tok) && currentCode) {
         var p = skipFloorPrefix(tokens, i);
         var floorRaw = tokens.slice(i, p).join(' ');
@@ -984,8 +1001,20 @@
       }
 
       if (codesHere.length) {
+        // 표가 페이지 경계를 넘어가며 "타입 항목 위치 품목명 옵션금액 비고사항" 헤더 행이
+        // 다시 인쇄되고 그 바로 뒤에 코드가 한 번 더 나오는 문서가 있다(실사례: 북수원이목지구
+        // 대방 디에트르 더 리체Ⅱ(A3BL) - "84B" 카탈로그가 페이지 경계에서 끊기고 다음 페이지에
+        // "84BP"가 헤더 재인쇄 직후 다시 나온다). 이건 새 타입으로의 전환이 아니라 직전
+        // 카탈로그가 페이지를 넘어 계속된다는 신호이므로("비고사항"/"비고"로 끝나는 표 헤더
+        // 직후라는 형태적 특징으로 판별), 새 그룹을 시작하는 대신 직전 그룹의 코드 목록에
+        // 추가해 이후 항목들이 두 코드 모두에 반영되게 한다.
+        var isHeaderRepeatCode = groups.length && /^(비고사항|비고)$/.test(tokens[i - 1] || '') &&
+          codesHere.every(function (c) { return groups[groups.length - 1].codes.indexOf(c) === -1; });
         if (current && current.startedByCode && current.firstMoney === null) {
           current.codes = current.codes.concat(codesHere);
+        } else if (isHeaderRepeatCode) {
+          groups[groups.length - 1].codes = groups[groups.length - 1].codes.concat(codesHere);
+          current = groups[groups.length - 1];
         } else {
           current = { codes: codesHere.slice(), firstMoney: null, startedByCode: true };
           groups.push(current);
