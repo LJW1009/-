@@ -2287,19 +2287,32 @@ function renderResult(){
     '</tbody></table></div></div>';
 
   // 4-1. 타입별 실거래건수 (월별로 나누지 않고 최근 12개월 합계만, cntSection과 같은 기간 기준)
-  const typeCntRows=typeGroups.flatMap(function(g){return g.types;}).map(function(r){
-    var cnt=0;
-    last12.forEach(function(m){
-      var md=DB.marketData[cid][m];
-      if(md)cnt+=(md.trades||[]).filter(function(tr){return tr.typeName===r.tn;}).length;
+  // — 평형별 시세 현황 표와 동일하게 groupLabel로 묶인 타입은 [그룹명] 평균 행도 함께 보여준다.
+  const typeCntBody=(function(){
+    var body='';
+    typeGroups.forEach(function(g){
+      var groupCnt=0;
+      g.types.forEach(function(r){
+        var cnt=0;
+        last12.forEach(function(m){
+          var md=DB.marketData[cid][m];
+          if(md)cnt+=(md.trades||[]).filter(function(tr){return tr.typeName===r.tn;}).length;
+        });
+        groupCnt+=cnt;
+        body+='<tr><td style="font-weight:700">'+(r.tn||'-')+'</td><td>'+r.t.exclPy+'평</td><td>'+r.dispPy+'평</td><td>'+(cnt>0?'<b>'+cnt+'</b>':0)+'</td></tr>';
+      });
+      if(!g.single){
+        var ga=calcGroupAvg(g.types,oft);
+        body+='<tr class="tr-group-avg"><td style="font-weight:700;color:#000000">['+g.groupLabel+'] 평균</td><td>'+ga.avgExcl+'평</td><td>'+ga.avgDisp+'평</td><td>'+(groupCnt>0?'<b>'+groupCnt+'</b>':0)+'</td></tr>';
+      }
     });
-    return{tn:r.tn||'-',exclPy:r.t.exclPy,dispPy:r.dispPy,cnt:cnt};
-  });
+    return body;
+  })();
   const typeCntSection='<div class="card"><div class="sec">타입별 실거래건수 (최근 12개월)</div>'+
     '<div class="tw"><table>'+
     '<thead><tr><th>타입</th><th>전용(평)</th><th>'+sqmLabel+'</th><th>실거래건수</th></tr></thead>'+
     '<tbody>'+
-    typeCntRows.map(function(r){return '<tr><td style="font-weight:700">'+r.tn+'</td><td>'+r.exclPy+'평</td><td>'+r.dispPy+'평</td><td>'+(r.cnt>0?'<b>'+r.cnt+'</b>':0)+'</td></tr>';}).join('')+
+    typeCntBody+
     '<tr class="hl"><td colspan="3" style="font-weight:700">합계</td><td style="font-weight:700;background:var(--gl);color:var(--gd)">'+totTr+'</td></tr>'+
     '</tbody></table></div></div>';
 
