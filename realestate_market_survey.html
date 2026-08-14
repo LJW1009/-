@@ -402,6 +402,7 @@ function calcGroupAvg(types, oft){
     avgDisp:Math.round(avgDisp*100)/100,
     trAvg:wavg(function(r){return r.ts?.avg||0;}),
     trPy:wavgPy(function(r){return r.ts?.avg||0;},function(r){return r.pyBase||0;}),
+    trCnt:types.reduce(function(a,r){return a+(r.ts?.cnt||0);},0),
     askAvg:wavg(function(r){return r.askAvg||0;}),
     askPy:wavgPy(function(r){return r.askAvg||0;},function(r){return r.pyBase||0;}),
     kbAvg:wavg(function(r){return r.kb?.avg||0;}),
@@ -2082,6 +2083,9 @@ function renderResult(){
   const wKbPy=wtdPyPrice(TR,function(r){return r.kb?.avg||0;});
   const totUnits=cx.types.reduce(function(a,t){return a+(t.units||0);},0)||cx.totalUnits||1;
   const totalListings=getListingTotal(cid,askM);
+  // 조회 범위(recM) 기준 실거래 건수 합계 — 상단 "최근 12개월 실거래"(totTr, 12개월 고정)와는
+  // 별개로, 표에 실제로 표시되는 타입별 건수(recM 범위)와 합이 맞도록 따로 계산한다.
+  const totTrCnt=TR.reduce(function(a,r){return a+(r.ts?.cnt||0);},0);
 
   // 1. 평형별 시세 현황
   const typeRows2=(function(){
@@ -2098,6 +2102,7 @@ function renderResult(){
           '<td>'+(r.ts?r.ts.max.toLocaleString()+'만':'<span class="nc">-</span>')+'</td>'+
           '<td>'+(r.ts?Math.round(r.ts.avg).toLocaleString()+'만':'<span class="nc">-</span>')+'</td>'+
           '<td>'+(r.ts?P(r.ts.avg,r.pyBase):'<span class="nc">-</span>')+'</td>'+
+          '<td>'+(r.ts?r.ts.cnt:'<span class="nc">-</span>')+'</td>'+
           '<td>'+(r.ask?.lo?r.ask.lo.toLocaleString()+'만':'<span class="nc">-</span>')+'</td>'+
           '<td>'+(r.ask?.hi?r.ask.hi.toLocaleString()+'만':'<span class="nc">-</span>')+'</td>'+
           '<td>'+(aa?Math.round(aa).toLocaleString()+'만':'<span class="nc">-</span>')+'</td>'+
@@ -2117,6 +2122,7 @@ function renderResult(){
           '<td colspan="2"><span class="nc">-</span></td>'+
           '<td>'+(ga.trAvg?ga.trAvg.toLocaleString()+'만':'<span class="nc">-</span>')+'</td>'+
           '<td>'+(ga.trPy?ga.trPy.toLocaleString()+'만':'<span class="nc">-</span>')+'</td>'+
+          '<td>'+(ga.trCnt?ga.trCnt:'<span class="nc">-</span>')+'</td>'+
           '<td colspan="2"><span class="nc">-</span></td>'+
           '<td>'+(ga.askAvg?ga.askAvg.toLocaleString()+'만':'<span class="nc">-</span>')+'</td>'+
           '<td>'+(ga.askPy?ga.askPy.toLocaleString()+'만':'<span class="nc">-</span>')+'</td>'+
@@ -2129,7 +2135,7 @@ function renderResult(){
             '<td colspan="3" style="font-weight:700;color:#000000;text-align:right;padding-right:8px">['+g.groupLabel+'] 임대수익률</td>'+
             '<td>'+ga.totU+'</td>'+
             '<td colspan="3"><span class="nc">-</span></td>'+
-            '<td><span class="nc">-</span></td>'+
+            '<td colspan="2"><span class="nc">-</span></td>'+
             '<td colspan="2"><span class="nc">-</span></td>'+
             '<td>'+(ga.stdDep!=null?ga.stdDep.toLocaleString()+'만':'<span class="nc">-</span>')+'</td>'+
             '<td>'+(ga.convRent!=null?ga.convRent.toLocaleString()+'만':'<span class="nc">-</span>')+'</td>'+
@@ -2319,11 +2325,11 @@ function renderResult(){
     '<div class="tw"><table>'+
     '<thead><tr>'+
     '<th rowspan="2">타입</th><th rowspan="2">전용(평)</th><th rowspan="2">'+sqmLabel+'</th><th rowspan="2">'+unitLabel+'수</th>'+
-    '<th colspan="4" class="th-tr">실거래가 ('+rangeN+'개월, 만원)</th>'+
+    '<th colspan="5" class="th-tr">실거래가 ('+rangeN+'개월, 만원)</th>'+
     '<th colspan="5" class="th-ask">호가 ('+(askM||'-')+', 만원)</th>'+
     '<th colspan="2" class="th-kb">KB시세 ('+(kbM||'-')+', 만원)</th>'+
     '</tr><tr>'+
-    '<th class="th-tr">최저</th><th class="th-tr">최고</th><th class="th-tr">평균</th><th class="th-tr">평당가</th>'+
+    '<th class="th-tr">최저</th><th class="th-tr">최고</th><th class="th-tr">평균</th><th class="th-tr">평당가</th><th class="th-tr">건수</th>'+
     '<th class="th-ask">최저</th><th class="th-ask">최고</th><th class="th-ask">평균</th><th class="th-ask">평당가</th><th class="th-ask">매물건수</th>'+
     '<th class="th-kb">평균</th><th class="th-kb">평당가</th>'+
     '</tr></thead><tbody>'+
@@ -2333,6 +2339,7 @@ function renderResult(){
     '<td>'+totUnits+'</td>'+
     '<td>'+N(wTrMin)+'</td><td>'+N(wTrMax)+'</td><td>'+N(wTrAvg)+'</td>'+
     '<td>'+(wTrPy!=null?wTrPy.toLocaleString()+'만':'<span class="nc">-</span>')+'</td>'+
+    '<td>'+(totTrCnt>0?totTrCnt:'<span class="nc">-</span>')+'</td>'+
     '<td colspan="2">-</td>'+
     '<td>'+N(wAskAvg)+'</td><td>'+(wAskPy!=null?wAskPy.toLocaleString()+'만':'<span class="nc">-</span>')+'</td>'+
     '<td>'+(totalListings!=null?totalListings+'건':'<span class="nc">-</span>')+'</td>'+
