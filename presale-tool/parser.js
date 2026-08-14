@@ -1355,11 +1355,15 @@
   // 이어붙이는 줄 수에 상한을 둔다).
   function mergeWrappedFloorLines(lines, resumeRe) {
     var floorStartRe = /^[ \t]*(\d+(?:~\d+)?[ \t]*층|기준층|최상층|최하층)/;
-    // resumeRe는 끝에 앵커가 없어 "107동"처럼 괄호 안의 동/호 번호 숫자 하나에도 우연히
-    // 매칭될 수 있다. 괄호로 묶인 부분은 지우고 나서도 여전히 매칭되는지로 재확인해야
-    // "괄호 안 동/호 번호"가 아니라 "괄호 밖 진짜 세대수"에 매칭된 것임을 보장할 수 있다.
+    // 괄호 안 내용(동/호 부연설명 등)은 지우고 판단해야 한다 - "괄호 안 동/호 번호"가
+    // 아니라 "괄호 밖 진짜 세대수"에 매칭된 것임을 보장하기 위해서다. 실제 데이터가
+    // "14층\n(최상)\n1 338,283,000..."처럼 층 표기와 숫자 사이에 괄호 부연설명이 끼어
+    // 있으면, 괄호를 지우기 전(원문 그대로)에는 "층" 바로 뒤가 공백이 아니라 "("라 영원히
+    // 매칭될 수 없다(실사례: 진월동지역주택조합 - 이 때문에 재개 지점을 못 찾고 그 다음
+    // 줄로 건너뛰어 그 사이 코드 헤더까지 통째로 유실됐다). 괄호를 지운 뒤의 매칭만으로
+    // 판단하면 충분하다 - 그 안의 숫자는 지워지고 없으니 "괄호 안 번호에 우연히 매칭"될
+    // 여지 자체가 없다.
     function matchesResume(s) {
-      if (!resumeRe.test(s)) return false;
       return resumeRe.test(s.replace(/\([^()]*\)/g, ' '));
     }
     var out = [];
@@ -1495,16 +1499,27 @@
 
     // 끊긴 지점 바로 다음이 "새 코드"로 시작한다는 보장이 없다(직전 코드의 나머지 층
     // 행일 수도 있음 - 실사례: 부산 장안지구 59B의 3/4층·기준층). 그래서 코드가 아니라
-    // "표가 다시 시작되는 지점"을 층 행 패턴(층 표기 바로 뒤에 숫자가 오는 줄 시작)으로 찾는다.
-    var RESUME_RE = /^[ \t]*(\d+(?:~\d+)?[ \t]*층|기준층|최상층|최하층)[ \t]+\d/m;
-    var searchText = fullText.slice(priceEndIdx, searchEnd);
+    // "표가 다시 시작되는 지점"을 층 행 패턴(층 표기 뒤에 숫자가 오는 줄 시작)으로 찾는다.
+    // repairUndercountedPriceRows와 같은 패턴(층 표기와 숫자 사이에 괄호 부연설명이 끼는
+    // 것도 허용 - "[^\d\n]*"는 숫자·개행만 아니면 무엇이든 통과시킨다)을 써야 한다.
+    // "14층\n(최상) 1 338,283,000..."처럼 층 표기와 실제 데이터가 괄호 부연설명을 사이에
+    // 두고 다른 줄로 쪼개지는 경우, mergeWrappedFloorLines로 한 줄로 합친 뒤에도 "층" 바로
+    // 뒤가 공백이 아니라 "("이므로 "[ \t]+\d"처럼 공백만 허용하는 패턴은 여전히 매칭되지
+    // 않는다 - 그러면 이 줄을 건너뛰고 그 다음(엉뚱하게 더 늦은) 매칭에서 재개해버려, 건너뛴
+    // 줄과 그 사이에 있던 코드 헤더까지 통째로 유실된다(실사례: 진월동지역주택조합 -
+    // "14층\n(최상)..."을 건너뛰고 그 다음 매칭인 "1층 2 359,530,000..."에서 재개되며, 그
+    // 사이의 실제 재개 지점이었던 84D의 마지막 행과 "115 109동 1호, 2호" 코드 헤더가 통째로
+    // 사라져 115가 아예 인식되지 않고 그 행들은 코드 없이 이어지다 이전 코드(84D)에 잘못
+    // 흡수됐다).
+    var RESUME_RE = /^[ \t]*(\d+(?:~\d+)?[ \t]*층|기준층|최상층|최하층)[^\d\n]*\d/m;
+    var searchText = mergeWrappedFloorLines(fullText.slice(priceEndIdx, searchEnd).split('\n'), RESUME_RE).join('\n');
     var m = searchText.match(RESUME_RE);
     if (!m || m.index == null) return null;
-    var resumeIdx = priceEndIdx + m.index;
+    var resumeIdx = m.index;
 
-    var resumeEnd = findNextHeadingBoundary(fullText, resumeIdx);
-    if (resumeEnd < 0 || resumeEnd > searchEnd) resumeEnd = searchEnd;
-    var continuation = fullText.slice(resumeIdx, resumeEnd).trim();
+    var resumeEnd = findNextHeadingBoundary(searchText, resumeIdx);
+    if (resumeEnd < 0) resumeEnd = searchText.length;
+    var continuation = searchText.slice(resumeIdx, resumeEnd).trim();
     if (!continuation) return null;
 
     var merged = (priceText + '\n' + continuation).trim();
