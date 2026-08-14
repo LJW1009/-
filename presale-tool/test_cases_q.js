@@ -1,7 +1,7 @@
 /*
- * 실제 공고문 원문 회귀 테스트 (Q01~Q06) - 봉선동 르 오네뜨 2차(광주광역시 남구).
+ * 실제 공고문 원문 회귀 테스트 (Q01~Q07) - 봉선동 르 오네뜨 2차(광주광역시 남구).
  * 사용자가 "PDF 인식은 되는데 타입별 분양가/확장비 등으로 전환이 안 된다"고 제보하며 새로
- * 업로드한 5개 실사례 문서 중 하나. 원인을 추적해 세 가지 새로운 실패 패턴을 발견했다:
+ * 업로드한 5개 실사례 문서 중 하나. 원인을 추적해 네 가지 실패 패턴을 발견했다:
  *   - 공급면적표의 약식표기가 표 셀 줄바꿈으로 "130\nA1"처럼 숫자 접두부와 문자 접미부가
  *     서로 다른 토큰으로 쪼개져(PDF 추출 시 사이에 공백만 남음) 코드 자체를 인식하지 못하고
  *     숫자만 남는 최후수단 규칙으로 잘못 대체되며, 130A1/130A2 두 타입이 "130" 하나로 뭉개짐
@@ -14,6 +14,12 @@
  *   - 헤더 키워드 "구분"의 두 글자 사이에 공백이 낀 "구 분"도 카탈로그형 표 판별에서 인식하도록
  *     stripCatalogTables/extractColumnAlignedCandidates를 넓혔다(같은 문서의 "계 약 금"/
  *     "중 도 금"처럼 PDF 추출 시 글자 사이 공백이 끼는 문제가 "구분"에도 있었음).
+ *   - "130A1"/"130A2"는 공고문 원문에 "무작위 배정"이라고 명시된, 같은 주택형(130.0926)에
+ *     속한 두 타입이라 공급금액표에 층별 행이 한 세트만 나오고 두 타입이 이를 공유한다.
+ *     scanPriceRowsWithMap이 "코드가 가격 섹션 전체에서 정확히 한 번만 등장하는가"를 근거로
+ *     삼아, 진짜 공유(코드가 이 한 지점에서만 유일하게 언급됨)와 단순 안내문(코드가 나중에
+ *     자기 이름의 데이터 블록을 또 가짐 - 실사례: 북수원이목지구 리체Ⅰ의 "84B 84C" 매핑 안내)
+ *     을 안전하게 구분한다.
  */
 var AREA_TEXT = [
   '■ 공급대상 [단위 : ㎡, 세대]',
@@ -130,6 +136,19 @@ module.exports = [
       var price = p.parsePriceSection(PRICE_TEXT, codes);
       var row = price.priceRows.find(function (x) { return x.code === '142PH'; });
       return !!row && row.price === 1450000000 && row.units === 2;
+    }
+  },
+  {
+    id: 'Q07',
+    desc: '공급금액표: "130A1\\n130A2"는 무작위 배정으로 가격표를 통째로 공유하므로(공고문 원문에 명시됨) 두 타입 모두 같은 6개 층별 행 전체(세대수 합계 54)를 그대로 반영 - 코드가 가격 섹션 전체에서 정확히 한 번만 등장할 때만 공유로 인정(H03/O04처럼 안내문에 코드가 나란히 언급되거나 별칭이 우연히 겹치는 경우와는 안전하게 구분됨)',
+    run: function (p) {
+      var codes = ['130A1', '130A2', '142PH'];
+      var price = p.parsePriceSection(PRICE_TEXT, codes);
+      var a1 = price.priceRows.filter(function (x) { return x.code === '130A1'; });
+      var a2 = price.priceRows.filter(function (x) { return x.code === '130A2'; });
+      var sum = function (rows) { return rows.reduce(function (s, r) { return s + r.units; }, 0); };
+      return a1.length === 6 && a2.length === 6 && sum(a1) === 54 && sum(a2) === 54
+        && a1[0].price === a2[0].price;
     }
   },
   {
