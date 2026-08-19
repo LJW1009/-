@@ -2930,6 +2930,17 @@ const FGT={type:'pattern',pattern:'solid',fgColor:{argb:'FF70AD47'}};
 const FH={type:'pattern',pattern:'solid',fgColor:{argb:'FFDEEBF7'}};
 const FB={bold:true,size:12,name:'나눔바른고딕'};
 const FT={bold:true,size:20,name:'나눔바른고딕'};
+// 단지별 요약본(AF~AK): 사용자가 제공한 실사용 서식 예시(메인 표와 같은 시트, 각 단지
+// 데이터 시작행(fd)부터 AF~AK열에 붙는 작은 타입별 요약 표)를 그대로 뜯어봐 반영 -
+// 본문(9~12pt)과 별개로 이 블록 전체가 9pt로 고정되어 있었다.
+const FB9={bold:true,size:9,name:'나눔바른고딕'};
+const FN9={bold:false,size:9,name:'나눔바른고딕'};
+// 헤더행 회색, "평형대 마감행"(단일 타입은 자기 값을 그대로 반복, 2개 이상은 세대수
+// 가중평균) 옅은 주황, 맨 아래 "평균"(전체 가중평균) 옅은 빨강 - 예시 파일의 실제 테마
+// 색상(강조6/강조2)에 각각 tint 0.8/0.6을 적용한 결과값을 openpyxl로 역산해 그대로 반영.
+const FSH={type:'pattern',pattern:'solid',fgColor:{argb:'FFD9D9D9'}};
+const FSC={type:'pattern',pattern:'solid',fgColor:{argb:'FFFDEADA'}};
+const FSA={type:'pattern',pattern:'solid',fgColor:{argb:'FFE6B9B8'}};
 // ExcelJS는 세로 정렬 값으로 'center'가 아니라 'middle'을 쓴다('center'를 넘기면
 // 유효하지 않은 값으로 조용히 무시되어 세로 정렬 속성 자체가 파일에 기록되지 않고,
 // 그러면 엑셀은 기본값인 "아래쪽 정렬"로 표시한다 - 실제로 열어보기 전엔 코드만 봐서는
@@ -2956,6 +2967,106 @@ function setCell(ws,r,c,v,f,fi,a,nf,bd){
   // 정렬은 모든 셀이 가운데(가로)+가운데(세로) 정렬이어야 한다는 요구에 따라, 별도로
   // 넘긴 값이 없으면(border/값만 채우는 호출 포함) 기본값으로 항상 가운데 정렬을 적용한다.
   if(f)cell.font=f;if(fi)cell.fill=fi;cell.alignment=a||AC;if(nf)cell.numFmt=nf;if(bd)cell.border=JSON.parse(JSON.stringify(bd));
+}
+// 단지별 요약본(AF~AK): 메인 표(A~S)와 같은 시트, 그 단지의 데이터 시작행(fd)부터 붙는
+// 타입별 요약 표. 사용자가 제공한 실사용 서식 예시를 openpyxl로 뜯어봐 그대로 반영했다.
+//   - 타입은 "평형대"(전용평수를 10평 단위로 내림한 값, 예: 36.9평→30평대)로 묶인다 -
+//     메인 표의 "OO합계"(약식표기 숫자 접두부 일치) 그룹과는 다른 기준이다. 5개 단지
+//     실사례 전부(102+121이 30평대로 묶이거나, 115+126이 30평대로 묶이는 등 약식표기
+//     접두부가 서로 달라도 평형대만 같으면 묶임)를 openpyxl로 직접 대조해 확인했다.
+//   - 평형대에 타입이 하나뿐이면 그 타입 행 하나 + 자기 값을 그대로 반복하는 "마감행"
+//     하나(총 2행), 둘 이상이면 타입별 행 + 세대수로 가중평균한 마감행 하나로 마무리한다
+//     - 마감행은 항상 옅은 주황(FSC) 배경이며, 맨 아래 "평균" 행의 가중평균은 언제나 각
+//     평형대의 이 마감행들만 참조한다(단일/그룹 여부와 무관하게 균일한 참조 지점).
+//   - 예시 파일에 "총 N 세대수"가 하드코딩 텍스트로 박혀 있었지만, 이 프로젝트는 값이
+//     아니라 항상 수식으로 참조해 편집에 따라 갱신되게 하는 원칙이므로 합계 행(H열)을
+//     실시간으로 참조하는 수식으로 바꿨다(의도적 차이 - 하드코딩 오류를 그대로 베끼지
+//     않음). 예시의 평형합계(구 2단지) 평균 행 AG/AH열도 앞 단지의 행 번호를 그대로 복사해
+//     남은 명백한 오류(다른 열은 정상)라 판단해 따르지 않고, 정상인 AI/AJ/AK열과 같은
+//     패턴(그 단지 자신의 마감행 참조)으로 통일했다.
+function buildSummaryBlock(ws,unit,titleRow,subs,tr){
+  const SC={type:32,expy:33,suppy:34,units:35,price:36,pypy:37};
+  let r=titleRow+5;
+  function sc(c,v,f,fi,a,nf){setCell(ws,r,c,v,f,fi,a,nf,BR_BOX_THIN);}
+  const NFPY='0.0"평"',NF0='#,##0';
+  const r1=r;
+  sc(SC.type,`=A${titleRow}`,FN9,null,{horizontal:'left',vertical:'middle'});
+  sc(SC.price,'*공급평형기준',FN9,null,AR);
+  ws.mergeCells(r1,SC.type,r1,SC.suppy);ws.mergeCells(r1,SC.price,r1,SC.pypy);
+  r++;
+  const r2=r;
+  sc(SC.type,'사용승인일 '+(unit.move_in||''),FN9,null,{horizontal:'left',vertical:'middle'});
+  sc(SC.suppy,`="총 "&H${tr}&" 세대수"`,FN9,null,{horizontal:'left',vertical:'middle'});
+  ws.mergeCells(r2,SC.type,r2,SC.expy);
+  r++;
+  const r3=r;
+  sc(SC.type,'구분(평형)',FB9,FSH,AC);sc(SC.units,'세대수',FB9,FSH,AC);sc(SC.price,'분양가',FB9,FSH,AC);
+  r++;
+  const r4=r;
+  sc(SC.type,'타입',FB9,FSH,AC);sc(SC.expy,'전용(평)',FB9,FSH,AC);sc(SC.suppy,'공급(평)',FB9,FSH,AC);
+  sc(SC.price,'평균',FB9,FSH,AC);sc(SC.pypy,'평당가',FB9,FSH,AC);
+  ws.mergeCells(r3,SC.type,r3,SC.suppy);ws.mergeCells(r3,SC.units,r4,SC.units);ws.mergeCells(r3,SC.price,r3,SC.pypy);
+  r++;
+
+  const decadeGroups=[];
+  subs.forEach(s=>{
+    const decade=Math.floor(s.t.exclusive_area*0.3025/10)*10;
+    let g=decadeGroups.find(x=>x.decade===decade);
+    if(!g){g={decade,members:[]};decadeGroups.push(g);}
+    g.members.push(s);
+  });
+
+  function writeTypeRow(s){
+    sc(SC.type,s.t.code,FN9,null,AC);
+    sc(SC.expy,`=A${s.ds}*0.3025`,FN9,null,AC,NFPY);
+    sc(SC.suppy,`=C${s.ds}`,FN9,null,AC,NFPY);
+    sc(SC.units,`=H${s.sr}`,FN9,null,AC,NF0);
+    sc(SC.price,`=I${s.sr}/10000`,FN9,null,AC,NF0);
+    sc(SC.pypy,`=${colLetter(SC.price)}${r}/${colLetter(SC.suppy)}${r}`,FN9,null,AC,NF0);
+  }
+
+  const closingRows=[];
+  decadeGroups.forEach(g=>{
+    if(g.members.length===1){
+      const dataRow=r;
+      writeTypeRow(g.members[0]);
+      r++;
+      const cRow=r;
+      sc(SC.type,undefined,FN9,FSC);
+      sc(SC.expy,`=${colLetter(SC.expy)}${dataRow}`,FN9,FSC,AC,NFPY);
+      sc(SC.suppy,`=${colLetter(SC.suppy)}${dataRow}`,FN9,FSC,AC,NFPY);
+      sc(SC.units,`=${colLetter(SC.units)}${dataRow}`,FN9,FSC,AC,NF0);
+      sc(SC.price,`=${colLetter(SC.price)}${dataRow}`,FN9,FSC,AC,NF0);
+      sc(SC.pypy,`=${colLetter(SC.pypy)}${dataRow}`,FN9,FSC,AC,NF0);
+      r++;
+      closingRows.push(cRow);
+    } else {
+      const startRow=r;
+      g.members.forEach(s=>{writeTypeRow(s);r++;});
+      const endRow=r-1,cRow=r;
+      const uRange=`${colLetter(SC.units)}${startRow}:${colLetter(SC.units)}${endRow}`;
+      const uDenom=`${colLetter(SC.units)}${cRow}`;
+      sc(SC.type,undefined,FN9,FSC);
+      [['expy',NFPY],['suppy',NFPY],['price',NF0],['pypy',NF0]].forEach(([key,nf])=>{
+        const cl=colLetter(SC[key]);
+        sc(SC[key],`=SUMPRODUCT(${cl}${startRow}:${cl}${endRow},${uRange})/${uDenom}`,FN9,FSC,AC,nf);
+      });
+      sc(SC.units,`=SUM(${uRange})`,FN9,FSC,AC,NF0);
+      r++;
+      closingRows.push(cRow);
+    }
+  });
+
+  const avgRow=r;
+  const uDenomAvg=`$${colLetter(SC.units)}$${avgRow}`;
+  sc(SC.type,'평균',FB9,FSA,AC);
+  [['expy',NFPY],['suppy',NFPY],['price',NF0]].forEach(([key,nf])=>{
+    const cl=colLetter(SC[key]);
+    const terms=closingRows.map(cr=>`${cl}${cr}*$${colLetter(SC.units)}$${cr}`).join('+');
+    sc(SC[key],`=(${terms})/${uDenomAvg}`,FB9,FSA,AC,nf);
+  });
+  sc(SC.units,`=${closingRows.map(cr=>`${colLetter(SC.units)}${cr}`).join('+')}`,FB9,FSA,AC,NF0);
+  sc(SC.pypy,`=${colLetter(SC.price)}${avgRow}/${colLetter(SC.suppy)}${avgRow}`,FB9,FSA,AC,NF0);
 }
 function buildBlock(ws,unit,startRow){
   let r=startRow;
@@ -3219,6 +3330,7 @@ function buildBlock(ws,unit,startRow){
   sc(18,`=Q${tr}+O${tr}`,FB,FTT,AR,FW,Object.assign({},boxBd(18),{bottom:BMED}));
   sc(19,`=R${tr}/C${tr}`,FB,FTT,AR,FW,Object.assign({},boxBd(19),{bottom:BMED}));
   ws.mergeCells(tr,1,tr,2);
+  buildSummaryBlock(ws,unit,titleRow,subs,tr);
   r++;return r;
 }
 
@@ -3246,6 +3358,8 @@ function doExport() {
       // null인 열은 그 예시에서도 별도 지정 없이(엑셀 기본 너비) 쓰인 열이라 여기서도 손대지 않는다.
       const cw=[13.25,null,null,null,null,null,null,null,17.75,13.25,null,null,null,null,null,null,null,14.75,13.25];
       cw.forEach((w,i)=>{if(w!=null)ws.getColumn(i+1).width=w;});
+      // 단지별 요약본(AJ=36/AK=37) 열 너비 - 나머지(AF~AI)는 예시에서도 기본 너비였다.
+      ws.getColumn(36).width=9.43;ws.getColumn(37).width=11.0;
       const nm = targetUnits.length===1 ? targetUnits[0].name : '분양가정리_전체';
       const buf = await wb.xlsx.writeBuffer();
       const blob = new Blob([buf], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
