@@ -251,14 +251,16 @@ module.exports = [
   },
   {
     id: 'S06',
-    desc: '목동윤슬자이 오피스텔: "최저가"/"최고가" 두 값을 지어낸 분배 없이 평균한 하나의 값으로 합쳐 115A 분양가가 (2,818,000,000+3,344,000,000)/2=3,081,000,000원으로 정확히 계산됨',
+    desc: '목동윤슬자이 오피스텔: "최저가"/"최고가" 세대수를 하나로 뭉개 지어낸 평균값을 쓰지 않고, 전체 세대수(118)를 절반씩(59/59) 나눠 각자 실제 가격(2,818,000,000/3,344,000,000)을 갖는 두 행으로 분리됨(가중평균은 소계 수식에서 계산)',
     run: function (p) {
       var sections = p.splitDocumentSections(MOKDONG_AREA_PRICE);
       var area = p.parseAreaSection(sections.area);
       var codes = area.map(function (a) { return a.code; });
       var price = p.parsePriceSection(sections.price, codes);
-      var row = price.priceRows.find(function (r) { return r.code === '115A'; });
-      return !!row && row.price === 3081000000 && row.units === 118;
+      var rows = price.priceRows.filter(function (r) { return r.code === '115A'; });
+      var low = rows.find(function (r) { return r.price === 2818000000; });
+      var high = rows.find(function (r) { return r.price === 3344000000; });
+      return rows.length === 2 && !!low && !!high && low.units === 59 && high.units === 59;
     }
   },
   {

@@ -974,21 +974,6 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     return { units: units, label: label, values: values, nextIndex: sliceStart + colMap.length };
   }
 
-  // "최저가"/"최고가" 두 행의 값을 항목별로 평균해 하나로 합친다. 분할 방식(대지비/건축비/
-  // 부가세/계약금/중도금 회차/잔금)이 두 값 모두 같은 비율 구조이므로, 항목별 평균의 합이
-  // 총액(price) 평균과도 일치해 내적 일관성이 그대로 유지된다.
-  function averagePriceValues(a, b) {
-    var out = {};
-    ['total', 'down', 'land', 'build', 'vat', 'balance'].forEach(function (k) {
-      if (a[k] != null && b[k] != null) out[k] = Math.round((a[k] + b[k]) / 2);
-      else out[k] = a[k] != null ? a[k] : b[k];
-    });
-    out.mid = (a.mid || []).map(function (v, idx) {
-      var bv = (b.mid || [])[idx];
-      return bv != null ? Math.round((v + bv) / 2) : v;
-    });
-    return out;
-  }
 
   // 헤더 컬럼맵을 이용해 코드/동호수가 매 행마다 반복되지 않고 이어지는(carry-forward)
   // 실제 공고문 표를 파싱한다. 코드가 나오면 새 주택형으로, 동호수가 나오면 그 동호수로
@@ -1096,31 +1081,50 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       // "최저가 ..." "최고가 ..." 두 행뿐, 층별 행 자체가 없음). 이 118을 아래 isFloorToken
       // 분기가 "층" 표기로 오인해 소비하면 최저가/최고가 두 행이 세대수 없는 라벨행으로 처리돼
       // pushRow의 fallback(세대수=1)이 적용되고, 타입당 세대수가 2로 왜곡된다. 최저가/최고가
-      // 사이의 실제 세대수 분배는 문서 어디에도 나와 있지 않으므로 지어내지 않고, 두 값을
-      // 평균한 값 하나로 합쳐 전체 세대수(코드 뒤 숫자)를 그대로 쓴다(합계가 실사례와 어긋나지
-      // 않도록 - 세대수를 나눠 배정하면 검증 불가능한 값을 지어내는 셈이 된다).
+      // 사이의 실제 세대수는 문서에 층별로 나와 있지 않으므로, 통상 저층부(최저가)/고층부
+      // (최고가)로 반반 나뉜다고 보고 전체 세대수를 절반씩 배정한다(사용자 확인: 이 업계
+      // 관행대로 반반 분배 후 가중평균하는 게 맞는 처리). 홀수면 나머지 1세대는 최고가 쪽에
+      // 붙여 합계가 정확히 전체 세대수가 되게 한다. 각 행은 자기 실제 가격(평균이 아님)을
+      // 그대로 쓰고, 소계/평균 행은 기존처럼 세대수 가중평균(SUMPRODUCT)으로 계산되므로
+      // 결과적으로 두 가격의 세대수 가중평균이 반영된다.
       if (/^\d+$/.test(tok) && currentCodes.length && !groupHasRows && tokens[i + 1] === '최저가') {
         var typeUnits = Number(tok);
         var lowRun = readMoneyRun(tokens, i + 1, colMap, unit_mult);
         if (lowRun && lowRun.label === '최저가' && tokens[lowRun.nextIndex] === '최고가') {
           var highRun = readMoneyRun(tokens, lowRun.nextIndex, colMap, unit_mult);
           if (highRun && highRun.label === '최고가') {
-            var avgValues = averagePriceValues(lowRun.values, highRun.values);
+            var lowUnits = Math.floor(typeUnits / 2);
+            var highUnits = typeUnits - lowUnits;
             currentCodes.forEach(function (code) {
               rows.push({
                 code: code,
-                floor: parseFloorDesc('전체'),
+                floor: parseFloorDesc('최저가'),
                 dong: currentDong,
-                units: typeUnits,
-                price: avgValues.total,
-                down_payment: avgValues.down != null ? avgValues.down : null,
+                units: lowUnits,
+                price: lowRun.values.total,
+                down_payment: lowRun.values.down != null ? lowRun.values.down : null,
                 down_is_ratio: false,
                 down_ratio: null,
-                land: avgValues.land,
-                build: avgValues.build,
-                vat: avgValues.vat,
-                balance: avgValues.balance,
-                mid_amounts: avgValues.mid
+                land: lowRun.values.land,
+                build: lowRun.values.build,
+                vat: lowRun.values.vat,
+                balance: lowRun.values.balance,
+                mid_amounts: lowRun.values.mid
+              });
+              rows.push({
+                code: code,
+                floor: parseFloorDesc('최고가'),
+                dong: currentDong,
+                units: highUnits,
+                price: highRun.values.total,
+                down_payment: highRun.values.down != null ? highRun.values.down : null,
+                down_is_ratio: false,
+                down_ratio: null,
+                land: highRun.values.land,
+                build: highRun.values.build,
+                vat: highRun.values.vat,
+                balance: highRun.values.balance,
+                mid_amounts: highRun.values.mid
               });
             });
             groupHasRows = true;
