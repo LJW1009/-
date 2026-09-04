@@ -1087,6 +1087,15 @@ function doParse() {
   if (!areaTypes.length) { toast('② 공급면적 표를 인식하지 못했습니다', 'warn'); return null; }
   const codes = areaTypes.map(t => t.code);
   const { midDates, priceRows } = parsePriceSection(f.taPrice, codes);
+  // 통합청약 패밀리(예: 103A1/103A2/103A3) 문서는 공급대상표에 하위코드별 개별 세대수가
+  // 아니라 패밀리 전체 합산값 하나만 나온다. reconcileFamilyAreaUnits가 가격 섹션에서
+  // 검증된 하위코드별 실제 세대수로 area 쪽 표시값을 바로잡는다(어댑터가 code별 dict로
+  // 재구성한 priceRows를 다시 code 필드가 있는 평평한 배열로 펼쳐서 전달).
+  const flatPriceRows = Object.keys(priceRows).reduce((acc, code) => {
+    priceRows[code].forEach(r => acc.push(Object.assign({ code }, r)));
+    return acc;
+  }, []);
+  reconcileFamilyAreaUnits(areaTypes, flatPriceRows);
   const balcony = parseBalconySection(f.taBalc, codes);
   const options = parseOptionSection(f.taOpt, codes);
   const meta = extractMeta((lastPdfFullText ? lastPdfFullText + '\n' : '') + f.taPrice + '\n' + f.taArea);

@@ -523,8 +523,39 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     return { code: code, exclusive_area: exclusive_area, supply_area: supply_area, supply_units: supply_units };
   }
 
+  // "◯◯◯.####A 주택형은 103A1, 103A2, 103A3로 구분되며"처럼, 여러 하위코드가 하나의
+  // 관리코드 아래 "통합청약"으로 묶이는 문서가 있다(실사례: 103A1/103A2/103A3,
+  // 103B1/103B2/103B3, 112A1/112A2/112A3, 128A1/128A2/128A3 - 청약 시 통합 접수되어
+  // 개별 선택이 불가함을 안내하는 각주). 이런 문서의 공급대상표는 PDF 재구성 순서상 이전
+  // 행의 마지막 숫자값(최하층우선배정세대수 등)이 공백 없이 바로 다음 하위코드 앞에
+  // 들러붙는 경우가 있다(실측: "195 5103A2" - "5"가 앞 행 값, "103A2"가 진짜 코드. 이걸
+  // 못 떼면 "5103A2"라는 존재하지 않는 코드로 잘못 인식되어 진짜 103A2가 통째로 유실된다).
+  // 이 각주가 명시적으로 나열하는 진짜 하위코드 목록을 근거로, 그 코드 바로 앞에 숫자가
+  // 공백 없이 붙은 자리만 공백을 끼워넣는다(각주에 실제로 선언된 코드만 대상으로 삼아 다른
+  // 문맥의 우연한 숫자+코드 조합까지 건드리지 않도록 한다).
+  function fixGluedSubCodesFromFootnote(text) {
+    var footnoteRe = /주택형은\s*((?:\d{2,4}[A-Za-z]{1,3}\d{0,2}\s*,\s*)+\d{2,4}[A-Za-z]{1,3}\d{0,2})\s*(?:로|으로)\s*구분/g;
+    var declared = {};
+    var m;
+    while ((m = footnoteRe.exec(text))) {
+      m[1].split(',').forEach(function (c) {
+        var code = c.trim();
+        if (code) declared[code] = true;
+      });
+    }
+    var codes = Object.keys(declared);
+    if (!codes.length) return text;
+    var out = text;
+    codes.forEach(function (code) {
+      var re = new RegExp('(\\d)(' + code.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')\\b', 'g');
+      out = out.replace(re, '$1 $2');
+    });
+    return out;
+  }
+
   function parseAreaSection(text) {
     text = fixGluedNumbers(String(text || '').replace(/㎡/g, ' '));
+    text = fixGluedSubCodesFromFootnote(text);
     var tokens = text.split(/\s+/).filter(Boolean);
     tokens = reglueSplitShortCodes(tokens);
 
@@ -978,8 +1009,34 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   // 헤더 컬럼맵을 이용해 코드/동호수가 매 행마다 반복되지 않고 이어지는(carry-forward)
   // 실제 공고문 표를 파싱한다. 코드가 나오면 새 주택형으로, 동호수가 나오면 그 동호수로
   // 갱신하고, "층구분 + 세대수 + (컬럼맵 길이)개의 금액" 패턴을 만나면 한 행으로 확정한다.
+  // "103.0590A 주택형은 103A1, 103A2, 103A3로 구분되며 ... 통합하여 접수"처럼, 여러 하위코드가
+  // 청약 단계에서는 하나로 묶여 코드 없이 반복되는 가격표를 갖는 문서가 있다(실사례: 전남
+  // 광주통합특별시 북구 임동 아파트 - "103.0590A" 긴 코드가 표에 한 번만 나오고, 그 뒤로
+  // "103A1"에 해당하는 층별 가격 블록 하나, 이어서 코드 표시가 전혀 없는 동일 구조의 블록이
+  // 정확히 하위코드 개수(103A2, 103A3)만큼 더 반복된다). "103.0590A"는 longCodeToShortCandidate로
+  // "103A"까지만 좁혀지고 "103A1/103A2/103A3" 중 어느 것도 정확히 가리키지 못해 그대로는 매칭
+  // 실패한다 - codeSet 안에서 "숫자+문자 접두부가 같고 끝자리 숫자만 다른" 코드가 2개 이상이면
+  // 그 접두부를 "패밀리"로 인정해, 트레일링 숫자 오름차순으로 순서를 매겨둔다.
+  function deriveCodeFamilies(codeSet) {
+    var byPrefix = {};
+    (codeSet || []).forEach(function (c) {
+      var m = /^(\d{2,4}[A-Za-z]{1,3})(\d{1,2})$/.exec(c);
+      if (!m) return;
+      (byPrefix[m[1]] = byPrefix[m[1]] || []).push({ code: c, variant: Number(m[2]) });
+    });
+    var families = {};
+    Object.keys(byPrefix).forEach(function (prefix) {
+      var members = byPrefix[prefix];
+      if (members.length < 2) return; // 우연히 끝자리가 숫자인 단독 코드와 구분하기 위해 최소 2개 이상만 인정
+      members.sort(function (a, b) { return a.variant - b.variant; });
+      families[prefix] = members.map(function (m) { return m.code; });
+    });
+    return families;
+  }
+
   function scanPriceRowsWithMap(tokens, dataStart, colMap, codeSet, unit_mult) {
     var rows = [];
+    var codeFamilies = deriveCodeFamilies(codeSet);
     // 무작위 배정 등으로 여러 코드가 가격표를 통째로 공유하는 문서가 있다(실사례: 봉선동
     // 르 오네뜨 2차 - "130A1\n130A2" 두 약식표기가 바로 붙어 나온 뒤 층별 행이 한 세트만
     // 이어짐. 같은 주택형 130.0926에 속하고 동·호수가 무작위 배정되어 두 타입의 분양가가
@@ -1002,6 +1059,8 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     var currentCodes = [];
     var groupHasRows = false;
     var groupIsShareable = false;
+    var familyQueue = []; // 통합청약 패밀리에서 아직 배정되지 않은 나머지 하위코드
+    var familyFirstFloor = null; // 현재 코드에서 처음 나온 층 표기(반복 블록의 시작점 판별용)
     var currentDong = '';
     var currentFloorRaw = null; // 세대수 없이 서브옵션(기본형/마이너스옵션)만 이어지는 행을 위해 직전 층을 기억
     var lastDongIdx = -1; // 직전 토큰이 동/호 토큰이었는지 (예: "101동" "2·3호" 두 토큰을 이어붙이기 위함)
@@ -1036,11 +1095,17 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
 
       var resolvedCode = null;
       var resolvedIsAlias = false;
+      var resolvedFamilyRest = null;
       if (codeSet) {
         if (codeSet.indexOf(tok) !== -1) resolvedCode = tok;
         else {
           var aliasCandidate = longCodeToShortCandidate(tok);
           if (aliasCandidate && codeSet.indexOf(aliasCandidate) !== -1) { resolvedCode = aliasCandidate; resolvedIsAlias = true; }
+          else if (aliasCandidate && codeFamilies[aliasCandidate]) {
+            resolvedCode = codeFamilies[aliasCandidate][0];
+            resolvedIsAlias = true;
+            resolvedFamilyRest = codeFamilies[aliasCandidate].slice(1);
+          }
         }
       } else if (SHORT_CODE_RE.test(tok) || LONG_CODE_RE.test(tok)) {
         resolvedCode = tok;
@@ -1050,6 +1115,8 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         if (currentCodes.length && !groupHasRows && isShareable && groupIsShareable) { currentCodes.push(resolvedCode); }
         else { currentCodes = [resolvedCode]; groupHasRows = false; }
         groupIsShareable = isShareable;
+        familyQueue = resolvedFamilyRest || [];
+        familyFirstFloor = null;
         currentDong = ''; currentFloorRaw = null; lastDongIdx = -1; i++; continue;
       }
 
@@ -1139,6 +1206,17 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         var floorRaw = tokens.slice(i, p).join(' ');
         var r = readMoneyRun(tokens, p, colMap, unit_mult);
         if (r) {
+          // 통합청약 패밀리 처리 중, 층 표기가 처음 값으로 되돌아오면(예: "45~49층"까지 다
+          // 채운 뒤 다시 "2~4층"이 나옴) 코드 표시 없는 다음 하위코드의 반복 블록이 시작된
+          // 것으로 본다. 동/호 목록이 페이지 경계에서 끊겨 블록 중간에 다시 나오는 경우
+          // (동 토큰 자체를 새 블록 신호로 삼으면 오탐 - 실측)와 달리, 층 표기가 "한 바퀴
+          // 다 돌고 처음으로 되돌아왔는지"는 블록이 진짜로 끝났는지를 안정적으로 알려준다.
+          if (familyQueue.length && familyFirstFloor !== null && floorRaw === familyFirstFloor) {
+            currentCodes = [familyQueue.shift()];
+            groupHasRows = false;
+            familyFirstFloor = null;
+          }
+          if (familyFirstFloor === null) familyFirstFloor = floorRaw;
           pushRow(floorRaw, r);
           currentFloorRaw = floorRaw;
           i = r.nextIndex;
@@ -1162,6 +1240,59 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     return rows;
   }
 
+  // 통합청약 패밀리(예: 103A1/103A2/103A3)는 공급대상표에 하위코드별 개별 세대수가 아니라
+  // 패밀리 전체 합산값 하나만 나온다(실사례: "223"이 103A1/103A2/103A3 셋을 합친 값인데
+  // 표 구조상 첫 하위코드에만 붙어 보이고, 나머지 하위코드는 PDF 재구성 순서상 값이 아예
+  // 없거나 엉뚱한 숫자가 붙는다). 반면 가격 섹션은 패밀리별로 반복되는 층별 표에서 각
+  // 하위코드의 실제 세대수를 정확히 합산해낼 수 있다(scanPriceRowsWithMap의 통합청약
+  // 처리 참고). 이 함수는 그 값을 대조해, 같은 패밀리의 가격 섹션 합산 세대수 총합이 공급
+  // 대상표에 실제로 나타나는 값(패밀리 구성원 중 누군가에게 표시된 값) 중 하나와 정확히
+  // 일치할 때만(=우연이 아니라는 산술적 증거가 있을 때만) 그 패밀리 구성원 전원의
+  // supply_units를 가격 섹션에서 계산한 정확한 값으로 교체한다. 일치하지 않으면 원래 값을
+  // 그대로 둔다(검증 안 된 값으로 함부로 덮어쓰지 않음 - 명시적 실패가 조용한 오염보다 안전).
+  function reconcileFamilyAreaUnits(areaTypes, priceRows) {
+    if (!areaTypes || !areaTypes.length || !priceRows || !priceRows.length) return areaTypes;
+    var codes = areaTypes.map(function (t) { return t.code; });
+    var families = deriveCodeFamilies(codes);
+    if (!Object.keys(families).length) return areaTypes;
+    var byCode = {};
+    areaTypes.forEach(function (t) { byCode[t.code] = t; });
+    var unitsByCode = {};
+    priceRows.forEach(function (r) { unitsByCode[r.code] = (unitsByCode[r.code] || 0) + (r.units || 0); });
+    Object.keys(families).forEach(function (prefix) {
+      var members = families[prefix];
+      var total = 0, allHavePriceRows = true;
+      members.forEach(function (c) {
+        if (!(c in unitsByCode)) allHavePriceRows = false;
+        total += unitsByCode[c] || 0;
+      });
+      if (!allHavePriceRows || total <= 0) return;
+      var declaredMatches = members.some(function (c) { return byCode[c] && byCode[c].supply_units === total; });
+      if (!declaredMatches) return;
+      members.forEach(function (c) { if (byCode[c]) byCode[c].supply_units = unitsByCode[c]; });
+    });
+    return areaTypes;
+  }
+
+  // 긴 소수형 관리코드가 줄바꿈 지점에서 마지막 숫자 한 자리(+문자 접미사)만 다음 줄로
+  // 잘려나가는 경우가 있다(실사례: "200.476\n8B" -> "200.4768B", "207.980\n7F" -> "207.9807F").
+  // 이렇게 쪼개지면 앞부분("200.476")은 코드로도 못 쓰이고("소수점 뒤 4자리" 관례에 못 미침),
+  // 코드 인식 자체가 실패해 이 타입의 가격 데이터가 통째로 유실되거나(직전 코드에 currentCodes가
+  // 남아있으면) 엉뚱한 타입에 잘못 흡수된다. 소수점 뒤 자릿수가 하나 부족한 토큰 바로 뒤에
+  // "숫자+문자" 토큰이 이어지고, 합쳤을 때 LONG_CODE_RE와 정확히 일치할 때만 재결합한다.
+  function reglueSplitLongCodes(tokens) {
+    var out = [];
+    for (var i = 0; i < tokens.length; i++) {
+      var cur = tokens[i], next = tokens[i + 1];
+      if (next && /^\d{2,3}\.\d{1,3}$/.test(cur) && /^\d{1,2}[A-Za-z]{1,2}$/.test(next)) {
+        var combined = cur + next;
+        if (LONG_CODE_RE.test(combined)) { out.push(combined); i++; continue; }
+      }
+      out.push(cur);
+    }
+    return out;
+  }
+
   function parsePriceSection(text, codes, baseDate) {
     text = fixGluedNumbers(despaceKeywords(String(text || '')));
     var hdr = parseTableHeader(text, baseDate);
@@ -1170,7 +1301,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
 
     // 1) 헤더 컬럼맵 우선 시도: 실제 공고문처럼 "대지비 건축비 합계 계약시 <날짜×6> 입주시"가
     //    명시된 경우, 표가 통째로 한 줄이거나 코드/동호수가 행마다 반복되지 않아도 정확히 파싱된다.
-    var allTokens = text.split(/\s+/).filter(Boolean);
+    var allTokens = reglueSplitLongCodes(text.split(/\s+/).filter(Boolean));
     var colInfo = buildPriceColumnMap(allTokens, baseDate);
     if (colInfo) {
       var rows = scanPriceRowsWithMap(allTokens, colInfo.dataStart, colInfo.map, codeSet, unit_mult);
@@ -2038,6 +2169,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   var api = {
     parseAreaSection: parseAreaSection,
     parsePriceSection: parsePriceSection,
+    reconcileFamilyAreaUnits: reconcileFamilyAreaUnits,
     parseBalconySection: parseBalconySection,
     parseOptionSection: parseOptionSection,
     extractMeta: extractMeta,
