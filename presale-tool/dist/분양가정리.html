@@ -3330,9 +3330,12 @@ function buildSummaryBlock(ws,unit,titleRow,subs,tr){
   ws.mergeCells(r3,SC.type,r3,SC.suppy);ws.mergeCells(r3,SC.units,r4,SC.units);ws.mergeCells(r3,SC.price,r3,SC.pypy);
   r++;
 
+  // 메인 표의 "OO합계" 그룹과 같은 group_key 오버라이드를 여기서도 그대로 따른다 -
+  // 두 표의 묶음 기준이 서로 달라지면 평균값이 안 맞아 보이므로(실사례로 확인된 혼란
+  // 원인) 항상 같은 값을 쓴다. 없으면 기존처럼 전용면적 10평 단위 내림으로 묶는다.
   const decadeGroups=[];
   subs.forEach(s=>{
-    const decade=Math.floor(s.t.exclusive_area*0.3025/10)*10;
+    const decade=s.t.group_key!=null?s.t.group_key:Math.floor(s.t.exclusive_area*0.3025/10)*10;
     let g=decadeGroups.find(x=>x.decade===decade);
     if(!g){g={decade,members:[]};decadeGroups.push(g);}
     g.members.push(s);
@@ -3599,9 +3602,15 @@ function buildBlock(ws,unit,startRow){
   // 실사례 엑셀에서 확인된 패턴: 타입 소계들과는 별도로, 동일 평형 그룹끼리 다시
   // 가중평균한 행을 추가해 비교하기 쉽게 한다(최종 "합계" 행은 이 그룹 행이 아니라
   // 타입별 소계에서 직접 집계 - 그룹 행은 참고용 중간 집계일 뿐).
+  // 타입 코드의 숫자 접두부만으로는 부족한 단지도 있다(실사례: 목동윤슬자이 오피스텔 -
+  // 115A/114B/114C처럼 접두부가 전부 달라 자동으로는 묶이지 않지만, 실제로는 같은 크기대
+  // 타입이라 사용자가 하나로 묶어달라고 직접 지정한 경우). 이럴 때 타입 데이터에
+  // group_key(묶을 기준값)/group_label(그룹 라벨, 생략 시 group_key 그대로)를 미리
+  // 심어두면 그 값으로 묶고, 없으면 기존 숫자 접두부 규칙 그대로 쓴다(대부분의 문서는
+  // 이 필드가 없으므로 회귀 없음).
   const groupOrder=[],groups={};
   subs.forEach(s=>{
-    const gkey=(String(s.t.code).match(/^\d+/)||[s.t.code])[0];
+    const gkey=(s.t.group_key!=null?String(s.t.group_key):(String(s.t.code).match(/^\d+/)||[s.t.code])[0]);
     if(!groups[gkey]){groups[gkey]=[];groupOrder.push(gkey);}
     groups[gkey].push(s);
   });
@@ -3610,11 +3619,12 @@ function buildBlock(ws,unit,startRow){
     // 같은 평형대 타입이 하나뿐이면(예: 74A 혼자) 그 타입의 소계와 완전히 똑같은 값이
     // 되어 중복이므로, 실사용 서식 예시에서 확인된 대로 그룹합계 행 자체를 만들지 않는다.
     if(mem.length<2)return;
+    const glabel=mem[0].t.group_label!=null?mem[0].t.group_label:gkey;
     const gr=r;rhi(16.9);
     fillSummaryRow(FGT);
     // "OO합계" 라벨은 A~B(1~2열)만 병합한다 - C열부터는 실제 값이 있으므로 B열
     // 오른쪽에는 구분선이 필요하다(소계 행의 A~D 병합과 다른 점).
-    sc(1,gkey+'합계',FB,FGT,AC,null,{left:BMED,top:BTHIN,bottom:BTHIN});
+    sc(1,glabel+'합계',FB,FGT,AC,null,{left:BMED,top:BTHIN,bottom:BTHIN});
     sc(2,undefined,null,FGT,null,null,{top:BTHIN,bottom:BTHIN,right:BTHIN});
     sc(8,`=${mem.map(m=>'H'+m.sr).join('+')}`,FB,FGT,AC,null,boxBd(8));
     // C(평당가 분모)는 표기 공급세대수(D)로, D는 실제 합산세대수(H)로 가중평균한다
