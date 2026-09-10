@@ -1383,6 +1383,13 @@ function renderEditTab(u) {
         <div class="edit-field"><label>공급세대수</label><input class="edit-in" type="number" id="e-units-${ti}" value="${t.supply_units}" oninput="markDirty()"></div>
         <div class="edit-field"><label>확장비(원)</label><input class="edit-in" type="number" id="e-balc-${ti}" value="${t.balcony_ext_cost}" oninput="markDirty()"></div>
         <div class="edit-field"><label>에어컨옵션(원)</label><input class="edit-in" type="number" id="e-opt-${ti}" value="${t.option_cost}" oninput="markDirty()"></div>
+        <div class="edit-field"><label>합계 그룹(선택)</label><input class="edit-in" id="e-group-${ti}" value="${esc(t.group_label||t.group_key||'')}" oninput="markDirty()" placeholder="예: 114~115 (같은 값끼리 묶임)"></div>
+      </div>
+      <div style="font-size:10px;color:var(--mut);margin-bottom:8px">
+        메인 표 "OO합계"/요약본은 기본적으로 약식표기 숫자 접두부(84A/84B→84합계)나 전용면적
+        10평 단위로 자동 묶인다. 그 자동 규칙으로 안 묶이는 타입들(접두부·평형대가 서로 달라도
+        같은 군으로 취급하고 싶을 때)은 여기에 같은 글자를 입력하면 그 값으로 묶인다(비워두면
+        자동 규칙 그대로).
       </div>
       <div style="font-size:11px;color:var(--mut);margin-bottom:6px">동/층별 분양가 행</div>
       <table class="row-edit-table" style="margin-bottom:4px">
@@ -1463,6 +1470,11 @@ function saveEdit() {
     t.supply_units   = parseInt(document.getElementById(`e-units-${ti}`)?.value)  || t.supply_units;
     t.balcony_ext_cost = parseInt(document.getElementById(`e-balc-${ti}`)?.value) || 0;
     t.option_cost    = parseInt(document.getElementById(`e-opt-${ti}`)?.value)    || 0;
+    // 합계 그룹 오버라이드 - 같은 문자열을 입력한 타입끼리 메인 표 "OO합계"/AF~AK 요약본에서
+    // 묶인다(비워두면 기존 자동 규칙 - 숫자 접두부/전용면적 10평 단위 - 로 되돌아감).
+    const groupVal = document.getElementById(`e-group-${ti}`)?.value.trim();
+    if (groupVal) { t.group_key = groupVal; t.group_label = groupVal; }
+    else { delete t.group_key; delete t.group_label; }
 
     // 행 데이터 수집 - 수정 탭 표에는 동/층/세대/분양가 입력칸만 있고 회차별 중도금
     // 실제 납부액(mid_amounts, 엑셀 중도금 이자 계산에 쓰임)은 편집 대상이 아니라 파서가
