@@ -343,7 +343,13 @@ function modeStdDep(results){
   results.forEach(function(r){const sd=r.yd.wolseResult?.stdDep;if(sd!=null)freq[sd]=(freq[sd]||0)+1;});
   const keys=Object.keys(freq);
   if(!keys.length)return null;
-  return parseInt(keys.sort(function(a,b){return freq[b]-freq[a];})[0]);
+  // 최빈값이 여러 개로 동률일 때는(예: 1000/2000이 동일 빈도) 그중 3000만원에 가장 가까운 쪽을
+  // 기본값으로 채택한다 — 데이터가 명확히 한쪽으로 쏠려 있으면 그대로 최빈값을 쓰고, 애매할 때만
+  // 3000을 기준으로 삼는다.
+  return parseInt(keys.sort(function(a,b){
+    if(freq[b]!==freq[a])return freq[b]-freq[a];
+    return Math.abs(a-3000)-Math.abs(b-3000);
+  })[0]);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -2668,10 +2674,7 @@ function exportExcel(){
       // hasRent일 때 매매가(수익률 산정 기준)를 숨김 컬럼으로 하나 더 붙인다 — 그룹/전체 평균의
       // 임대수익률을 "개별 수익률의 가중평균"이 아니라 "환산보증금·환산월세·매매가를 먼저 합쳐
       // 수익률 공식을 다시 계산"하는 방식으로 내려면 매매가를 셀로 참조할 수 있어야 하기 때문.
-      // 추가로 호가/KB시세 평당가를 "가격÷평형" 수식으로 걸기 위한 원가(가공 전 평균가) 숨김 컬럼
-      // 2개를 항상 P열 다음(Q,R열)에 고정 배치한다 — hasRent 여부와 무관하게 시트 전체에서 같은
-      // 절대 열 위치를 유지해야 !cols의 숨김 처리가 다른 단지 블록의 보이는 열을 건드리지 않는다.
-      const totalCols=hasRent?visibleCols+3:visibleCols+9;
+      const totalCols=hasRent?visibleCols+1:visibleCols;
       const baseColIdx=visibleCols-2;
       const areaColIdx=oft?1:2; // 평당가 분모 열: 오피스텔=전용(1열), 아파트=공급/계약(2열)
       maxCol=Math.max(maxCol,totalCols);
@@ -2695,21 +2698,18 @@ function exportExcel(){
       pushRow(r3);
       addMerge(R-1,0,R-1,3);
       if(hasRent){
-        const h1=[H('구분(평형)'),HB(),HB(),H(unitWord+'수'),H('실거래가'),HB(),H('당월(평당)'),HB(),H('전세'),HB(),H('월세'),HB(),H('임대수익률'),HB(),HB(),HB(),HB()];
+        const h1=[H('구분(평형)'),HB(),HB(),H(unitWord+'수'),H('실거래가'),HB(),H('당월(평당)'),HB(),H('전세'),HB(),H('월세'),HB(),H('임대수익률'),HB(),HB()];
         pushRow(h1);
         addMerge(R-1,0,R-1,2); addMerge(R-1,4,R-1,5); addMerge(R-1,6,R-1,7);
         addMerge(R-1,8,R-1,9); addMerge(R-1,10,R-1,11); addMerge(R-1,12,R-1,13);
-        const h2=[H('타입'),H('전용(평)'),H(pyWord+'(평)'),H(unitWord+'수'),H('평균'),H('평당가'),H('호가'),H('KB시세'),H('평균'),H('평당가'),H('환산보증금'),H('환산월세'),H('대출 X'),H('대출 50%'),H('매매가(수익률산정)'),H('호가원가'),H('KB원가')];
+        const h2=[H('타입'),H('전용(평)'),H(pyWord+'(평)'),H(unitWord+'수'),H('평균'),H('평당가'),H('호가'),H('KB시세'),H('평균'),H('평당가'),H('환산보증금'),H('환산월세'),H('대출 X'),H('대출 50%'),H('매매가(수익률산정)')];
         pushRow(h2);
         addMerge(R-2,3,R-1,3);
       } else {
-        // !hasRent 블록은 visibleCols(8)까지만 실제 열이고 J~P열은 아예 쓰지 않으므로, H()/HB()
-        // (회색 배경+테두리 고정) 대신 null로 남겨 그 구간에 회색/테두리가 생기지 않게 한다.
-        // Q,R(호가원가·KB원가)은 숨김열이라 라벨을 남겨도 화면엔 안 보인다.
-        const h1=[H('구분(평형)'),HB(),HB(),H(unitWord+'수'),H('실거래가'),HB(),H('당월(평당)'),HB(),null,null,null,null,null,null,null,HB(),HB()];
+        const h1=[H('구분(평형)'),HB(),HB(),H(unitWord+'수'),H('실거래가'),HB(),H('당월(평당)'),HB()];
         pushRow(h1);
         addMerge(R-1,0,R-1,2); addMerge(R-1,4,R-1,5); addMerge(R-1,6,R-1,7);
-        const h2=[H('타입'),H('전용(평)'),H(pyWord+'(평)'),H(unitWord+'수'),H('평균'),H('평당가'),H('호가'),H('KB시세'),null,null,null,null,null,null,null,H('호가원가'),H('KB원가')];
+        const h2=[H('타입'),H('전용(평)'),H(pyWord+'(평)'),H(unitWord+'수'),H('평균'),H('평당가'),H('호가'),H('KB시세')];
         pushRow(h2);
         addMerge(R-2,3,R-1,3);
       }
@@ -2726,31 +2726,23 @@ function exportExcel(){
           allTypeRowNums.push(R+1+ROW_OFFSET); // 이 타입 행이 pushRow 이후 위치할 1-based 엑셀 행 번호
           const wr=r.yd.wolseResult;const y=wr?.yld;
           const rowNum=allTypeRowNums[allTypeRowNums.length-1];
-          // 평당가(실거래/호가/KB시세/전세)는 이제 정적값이 아니라 이 행 자체의 가격÷평형 수식으로
-          // 계산한다. 호가·KB시세는 화면엔 평당가만 보여주므로 원가(가공 전 평균가)를 Q,R 숨김열에
-          // 별도로 저장해 수식이 참조할 수 있게 한다.
+          // 실거래·전세 평당가는 이 행 자체의 가격(F/J열)÷평형 수식으로 계산한다. 호가·KB시세
+          // 평당가는 원가를 저장해 둘 별도 숨김열이 없으므로(요청에 따라 제거) 정적값으로 유지.
           if(hasRent){
             pushRow([
               D(r.tn||'-'),DP(r.t.exclPy),DP(r.dispPy),D(r.t.units),
               D(r.ts?Math.round(r.ts.avg):null),DF(_pyF(rowNum,4,areaColIdx),r.ts&&r.pyBase?Math.round(r.ts.avg/r.pyBase):null),
-              DF(_pyF(rowNum,15,areaColIdx),r.askAvg&&r.pyBase?Math.round(r.askAvg/r.pyBase):null),
-              DF(_pyF(rowNum,16,areaColIdx),r.kb?.avg&&r.pyBase?Math.round(r.kb.avg/r.pyBase):null),
+              D(r.askAvg&&r.pyBase?Math.round(r.askAvg/r.pyBase):null),D(r.kb?.avg&&r.pyBase?Math.round(r.kb.avg/r.pyBase):null),
               D(r.yd.jsAvg?Math.round(r.yd.jsAvg):null),DF(_pyF(rowNum,8,areaColIdx),r.yd.jsAvg&&r.pyBase?Math.round(r.yd.jsAvg/r.pyBase):null),
               D(wr?wr.stdDep:null),D(wr?Math.round(wr.convRentAvg):null),
               YP(y?.y1), YP(y?.y2),
-              D(r.yd.salePrice?Math.round(r.yd.salePrice):null),
-              D(r.askAvg?Math.round(r.askAvg):null),
-              D(r.kb?.avg?Math.round(r.kb.avg):null)
+              D(r.yd.salePrice?Math.round(r.yd.salePrice):null)
             ]);
           } else {
             pushRow([
               D(r.tn||'-'),DP(r.t.exclPy),DP(r.dispPy),D(r.t.units),
               D(r.ts?Math.round(r.ts.avg):null),DF(_pyF(rowNum,4,areaColIdx),r.ts&&r.pyBase?Math.round(r.ts.avg/r.pyBase):null),
-              DF(_pyF(rowNum,15,areaColIdx),r.askAvg&&r.pyBase?Math.round(r.askAvg/r.pyBase):null),
-              DF(_pyF(rowNum,16,areaColIdx),r.kb?.avg&&r.pyBase?Math.round(r.kb.avg/r.pyBase):null),
-              null,null,null,null,null,null,null,
-              D(r.askAvg?Math.round(r.askAvg):null),
-              D(r.kb?.avg?Math.round(r.kb.avg):null)
+              D(r.askAvg&&r.pyBase?Math.round(r.askAvg/r.pyBase):null),D(r.kb?.avg&&r.pyBase?Math.round(r.kb.avg/r.pyBase):null)
             ]);
           }
         });
@@ -2782,8 +2774,7 @@ function exportExcel(){
               GF(fConvRent,ga.convRent||null,gFill),
               GF(fY1,ga.gaY1!=null?ga.gaY1.toFixed(1)+'%':'',gFill),
               GF(fY2,ga.gaY2!=null?ga.gaY2.toFixed(1)+'%':'',gFill),
-              GF(fSaleP,ga.salePrice||null,gFill),
-              null,null
+              GF(fSaleP,ga.salePrice||null,gFill)
             ]);
           } else {
             pushRow([
@@ -2794,8 +2785,7 @@ function exportExcel(){
               GF(fTrAvg,ga.trAvg||null,gFill),
               GF(fTrPy,ga.trPy||null,gFill),
               GF(fAskPy,ga.askPy||null,gFill),
-              GF(fKbPy,ga.kbPy||null,gFill),
-              null,null,null,null,null,null,null,null,null
+              GF(fKbPy,ga.kbPy||null,gFill)
             ]);
           }
         }
@@ -2836,8 +2826,7 @@ function exportExcel(){
           AF(fConvRent, wConvRent?Math.round(wConvRent):null, aFill),
           AFS(fY1, wY1!=null?wY1.toFixed(1)+'%':'', aFill),
           AFS(fY2, wY2!=null?wY2.toFixed(1)+'%':'', aFill),
-          AF(fSaleP, wSaleP?Math.round(wSaleP):null, aFill),
-          null,null
+          AF(fSaleP, wSaleP?Math.round(wSaleP):null, aFill)
         ]);
       } else {
         pushRow([
@@ -2848,8 +2837,7 @@ function exportExcel(){
           AF(fTrAvg, wTrAvg?Math.round(wTrAvg):null, aFill),
           AF(fTrPy, wTrPy||null, aFill),
           AF(fAskPy, wAskPy||null, aFill),
-          AF(fKbPy, wKbPy||null, aFill),
-          null,null,null,null,null,null,null,null,null
+          AF(fKbPy, wKbPy||null, aFill)
         ]);
       }
       const avgR=R-1;
@@ -2862,29 +2850,23 @@ function exportExcel(){
       });
       const totalListings=getListingTotal(cx.id,askM);
       const listStr=totalListings!=null?totalListings+'건':'-';
-      // M()은 항상 4방향 테두리(ALLB)를 그리므로, 보이는 열 범위(visibleCols)를 벗어나는
-      // 매매가/호가원가/KB원가 숨김열까지 M('')로 채우면 그 칸에도 테두리가 생겨 표가 빈 칸으로
-      // 늘어나 보인다. 보이는 범위 밖은 null로 남겨 셀 자체를 만들지 않는다.
       if(hasRent){
         pushRow([
           M('매물 건수'),M(listStr),M('실거래(최근1년)'),M(tot1y_tr+'건'),
           M('전세실거래'),M(tot1y_js+'건'),M('월세실거래'),M(tot1y_ws+'건'),
-          M(''),M(''),M(''),M(''),M(''),M(''),
-          null,null,null
+          M(''),M(''),M(''),M(''),M(''),M(''),M('')
         ]);
       } else {
         pushRow([
           M('매물 건수'),M(listStr),M('실거래(최근1년)'),M(tot1y_tr+'건'),
-          M(''),M(''),M(''),M(''),
-          null,null,null,null,null,null,null,null,null
+          M(''),M(''),M(''),M('')
         ]);
       }
       const cntR=R-1;
       const blockEndR=R-1;
-      // 겉 테두리는 실제로 보이는 열(visibleCols)까지만 — totalCols는 매매가/호가원가/KB원가 등
-      // 숨김·패딩용 열까지 포함하고 있어서, 이 기준으로 테두리를 그리면 !hasRent 단지의 경우
-      // 내용이 전혀 없는 전세/환산보증금/임대수익률 열(숨김 처리되지 않은 열)까지 표가 쓸데없이
-      // 늘어나 보이는 문제가 있었다.
+      // 겉 테두리는 실제로 보이는 열(visibleCols)까지만 — totalCols는 hasRent 블록의 숨김
+      // 매매가(P)열까지 포함하고 있어서, 이 기준으로 테두리를 그리면 !hasRent 단지의 경우
+      // 내용이 전혀 없는 전세/환산보증금/임대수익률 열까지 표가 쓸데없이 늘어나 보이는 문제가 있었다.
       for(let cc=0;cc<visibleCols;cc++){
         markBorder(blockStartR,cc,'top');
         markBorder(blockEndR,cc,'bottom');
@@ -3022,13 +3004,9 @@ function exportExcel(){
     const colW=[];
     colW.push({wch:2});
     for(let i=0;i<Math.max(maxCol+2,9);i++)colW.push({wch:i===0?11:i<4?8:9});
-    // 매매가(수익률 산정용, hasRent 블록의 15번째 데이터열=P열)와 호가/KB원가(Q,R열) 숨김 처리 —
-    // 화면에는 안 보이지만 평당가·임대수익률 수식이 참조하는 값이므로 셀 자체는 남겨둔다.
-    // hasRent 여부와 무관하게 모든 단지 블록에서 항상 같은 절대 열(P,Q,R)에 고정 배치되므로
-    // 시트 전체에 걸쳐 숨겨도 다른 단지의 보이는 열을 건드리지 않는다.
+    // 매매가(수익률 산정용, hasRent 블록의 15번째 데이터열=P열) 숨김 처리 — 화면에는 안 보이지만
+    // 그룹/전체 평균의 임대수익률 수식이 참조하는 값이므로 셀 자체는 남겨둔다.
     if(colW[15])colW[15]={...colW[15],hidden:true};
-    if(colW[16])colW[16]={...colW[16],hidden:true};
-    if(colW[17])colW[17]={...colW[17],hidden:true};
     ws['!cols']=colW;
     const sn=sheetName.length>31?sheetName.slice(0,31):sheetName;
     XLSX.utils.book_append_sheet(wb,ws,sn);
