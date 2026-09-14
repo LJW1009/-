@@ -1099,6 +1099,12 @@ function doParse() {
   const balcony = parseBalconySection(f.taBalc, codes);
   const options = parseOptionSection(f.taOpt, codes);
   const meta = extractMeta((lastPdfFullText ? lastPdfFullText + '\n' : '') + f.taPrice + '\n' + f.taArea);
+  // 중도금 대출 안내(■ 중도금 대출 안내) 섹션이 타입 구간별로 다른 무이자/이자후불제
+  // 조건을 명시하는 문서가 있다(실사례: 힐스테이트 송파더그리드 오피스텔). PDF 전체
+  // 원문에서만 찾을 수 있으므로(4개 입력란 어디에도 속하지 않는 별도 프로즈) 직접
+  // 붙여넣은 문서(PDF 미첨부)는 이 기능이 적용되지 않고 기존처럼 단지 전체 설정을
+  // 그대로 쓴다(회귀 없음).
+  const interestByCode = lastPdfFullText ? parseInterestSection(lastPdfFullText, codes) : {};
 
   // 미리보기 칩
   const bar = document.getElementById('prev-bar');
@@ -1106,17 +1112,20 @@ function doParse() {
   let h = `<span class="chip ${meta.open_date?'info':'warn'}">오픈일 ${meta.open_date||'미인식'}</span>`;
   h += `<span class="chip ${meta.move_in_year?'info':'warn'}">입주 ${meta.move_in_year||'?'}년${meta.move_in_month||'?'}월</span>`;
   h += `<span class="chip ${midDates.length===6?'ok':'warn'}">중도금 ${midDates.length}/6</span>`;
+  if (Object.keys(interestByCode).length) {
+    h += `<span class="chip info">중도금 대출 조건 타입별 인식됨(${Object.keys(interestByCode).length}개)</span>`;
+  }
   areaTypes.forEach(t => {
     const rows = priceRows[t.code]||[], sum = rows.reduce((s,r)=>s+r.units,0), ok = sum===t.supply_units;
-    h += `<span class="chip ${ok?'ok':'err'}">${t.code} ${ok?'✓'+sum:'⚠표기'+t.supply_units+'/합산'+sum} | 확장비${(balcony[t.code]||0).toLocaleString()} | 옵션${(options[t.code]||0).toLocaleString()}</span>`;
+    h += `<span class="chip ${ok?'ok':'err'}">${t.code} ${ok?'✓'+sum:'⚠표기'+t.supply_units+'/합산'+sum} | 확장비${(balcony[t.code]||0).toLocaleString()} | 옵션${(options[t.code]||0).toLocaleString()}${interestByCode[t.code]?' | 중도금'+interestByCode[t.code]:''}</span>`;
   });
   document.getElementById('prev-chips').innerHTML = h;
-  return { f, areaTypes, codes, midDates, priceRows, balcony, options, meta };
+  return { f, areaTypes, codes, midDates, priceRows, balcony, options, meta, interestByCode };
 }
 
 function doAdd() {
   const p = doParse(); if (!p) return;
-  const { f, areaTypes, codes, midDates, priceRows, balcony, options, meta } = p;
+  const { f, areaTypes, codes, midDates, priceRows, balcony, options, meta, interestByCode } = p;
   const openDt = meta.open_date ? parseDate(meta.open_date) : new Date();
   const my = meta.move_in_year || (openDt.getFullYear()+3);
   const mm = meta.move_in_month || 12;
@@ -1136,15 +1145,22 @@ function doAdd() {
     mid_dates: midDates.length > 0 ? midDates.map(s=>parseDate(s)) : null,
     // 원본 입력 저장
     raw: { price: f.taPrice, area: f.taArea, balc: f.taBalc, opt: f.taOpt },
-    types: areaTypes.map(t => ({
-      code: t.code,
-      exclusive_area: t.exclusive_area,
-      supply_area: t.supply_area,
-      supply_units: t.supply_units,
-      balcony_ext_cost: balcony[t.code] || 0,
-      option_cost: options[t.code] || 0,
-      rows: priceRows[t.code] || [],
-    }))
+    types: areaTypes.map(t => {
+      const type = {
+        code: t.code,
+        exclusive_area: t.exclusive_area,
+        supply_area: t.supply_area,
+        supply_units: t.supply_units,
+        balcony_ext_cost: balcony[t.code] || 0,
+        option_cost: options[t.code] || 0,
+        rows: priceRows[t.code] || [],
+      };
+      // "■ 중도금 대출 안내" 섹션에서 이 타입만 명시적으로 다른 조건(무이자/이자후불제)이
+      // 인식됐을 때만 오버라이드를 심는다 - 없으면 필드 자체를 안 만들어 단지 전체 설정을
+      // 그대로 따르게 한다(회귀 없음, group_key와 동일한 설계).
+      if (interestByCode && interestByCode[t.code]) type.interest = interestByCode[t.code];
+      return type;
+    })
   };
   units.push(unit);
   saveUnits();
@@ -1384,6 +1400,13 @@ function renderEditTab(u) {
         <div class="edit-field"><label>확장비(원)</label><input class="edit-in" type="number" id="e-balc-${ti}" value="${t.balcony_ext_cost}" oninput="markDirty()"></div>
         <div class="edit-field"><label>에어컨옵션(원)</label><input class="edit-in" type="number" id="e-opt-${ti}" value="${t.option_cost}" oninput="markDirty()"></div>
         <div class="edit-field"><label>합계 그룹(선택)</label><input class="edit-in" id="e-group-${ti}" value="${esc(t.group_label||t.group_key||'')}" oninput="markDirty()" placeholder="예: 114~115 (같은 값끼리 묶임)"></div>
+        <div class="edit-field"><label>중도금 이자 조건(선택)</label>
+          <select class="edit-in" id="e-interest-${ti}" onchange="markDirty()">
+            <option value="" ${!t.interest?'selected':''}>단지 전체 설정 그대로(${u.interest==='무이자'?'무이자':'이자 후불제'})</option>
+            <option value="무이자" ${t.interest==='무이자'?'selected':''}>무이자</option>
+            <option value="후불제" ${t.interest==='후불제'?'selected':''}>이자 후불제</option>
+          </select>
+        </div>
       </div>
       <div style="font-size:10px;color:var(--mut);margin-bottom:8px">
         메인 표 "OO합계"/요약본은 기본적으로 약식표기 숫자 접두부(84A/84B→84합계)나 전용면적
@@ -1475,6 +1498,11 @@ function saveEdit() {
     const groupVal = document.getElementById(`e-group-${ti}`)?.value.trim();
     if (groupVal) { t.group_key = groupVal; t.group_label = groupVal; }
     else { delete t.group_key; delete t.group_label; }
+    // 중도금 이자 조건 오버라이드 - "단지 전체 설정 그대로"(빈 값)면 필드 자체를 지워
+    // 단지 전체 설정(u.interest)을 그대로 따르게 한다(28차 group_key와 동일한 설계).
+    const interestVal = document.getElementById(`e-interest-${ti}`)?.value;
+    if (interestVal) t.interest = interestVal;
+    else delete t.interest;
 
     // 행 데이터 수집 - 수정 탭 표에는 동/층/세대/분양가 입력칸만 있고 회차별 중도금
     // 실제 납부액(mid_amounts, 엑셀 중도금 이자 계산에 쓰임)은 편집 대상이 아니라 파서가
@@ -1741,7 +1769,16 @@ function buildBlock(ws,unit,startRow){
   let r=startRow;
   // 중도금 납부일: 없으면 null (무이자/중도금없는 준공완료 단지)
   const hasMidDates = unit.mid_dates && unit.mid_dates.length > 0;
-  const isInterestFree = unit.interest === '무이자' || unit.rate === 0;
+  // 타입마다 중도금 무이자/이자후불제 조건이 다른 문서가 있다(실사례: 힐스테이트
+  // 송파더그리드 오피스텔 - "34A/34B/36 타입은 무이자, 42~119 타입은 이자후불제"처럼
+  // "■ 중도금 대출 안내" 섹션이 타입 구간별로 다르게 명시). t.interest(파서가
+  // parseInterestSection으로 채우거나 "수정" 탭에서 사용자가 직접 지정)가 있으면
+  // 그 타입에 한해 우선 적용하고, 없으면 기존처럼 단지 전체 설정을 그대로 쓴다
+  // (대부분의 문서는 이 필드가 없으므로 회귀 없음).
+  function isInterestFreeFor(t){
+    if(t.interest)return t.interest==='무이자';
+    return unit.interest==='무이자'||unit.rate===0;
+  }
   const isOfficetel = unit.kind !== '아파트';
   const mids = hasMidDates ? unit.mid_dates : (()=>{
     const od=unit.open_dt||new Date(),md=unit.move_in_dt||new Date(od.getFullYear()+3,11,1);
@@ -1941,7 +1978,7 @@ function buildBlock(ws,unit,startRow){
       const ma=row.mid_amounts||[];
       for(let i=0;i<6;i++){
         const col=DATE_COL0+i, cl=colLetter(col);
-        if (isInterestFree || !hasMidDates) { sc(col,0,null,null,AC,FW,BR_BOX_THIN); }
+        if (isInterestFreeFor(t) || !hasMidDates) { sc(col,0,null,null,AC,FW,BR_BOX_THIN); }
         else {
           const amt=(i<mids.length&&i<ma.length)?ma[i]:0;
           sc(col,`=(${amt}*$${colLetter(RATE_COL)}$${h1r})*(${cl}$${h2r}/365)`,null,null,AC,FW,BR_BOX_THIN);
