@@ -1,0 +1,19 @@
+{
+  "name": "detre-flow",
+  "version": "1.0.0",
+  "description": "영업계획팀 법규·보도자료 자료 제작 파이프라인",
+  "private": true,
+  "scripts": {
+    "icons": "node scripts/make_icons.js",
+    "press": "node scripts/build_press_ppt.js",
+    "report": "node scripts/build_report_ppt.js"
+  },
+  "dependencies": {
+    "pptxgenjs": "^3.12.0",
+    "image-size": "^2.0.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-icons": "^5.0.0",
+    "sharp": "^0.33.0"
+  }
+}

@@ -1,0 +1,6 @@
+node_modules/
+output/
+*.pdf
+*.png
+!assets/**/*.png
+~$*
