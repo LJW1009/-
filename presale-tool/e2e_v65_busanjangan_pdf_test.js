@@ -76,8 +76,9 @@ const ExcelJS = require('exceljs');
   let found468700000 = false, found353600000 = false;
   ws.eachRow((row) => {
     const v = row.getCell(9).value; // I열 = 분양가
-    if (v === 468700000) found468700000 = true;
-    if (v === 353600000) found353600000 = true;
+    // 29차 후속7: I열은 천원 단위로 저장된다(468,700,000원 → 468700).
+    if (v === 468700) found468700000 = true;
+    if (v === 353600) found353600000 = true;
   });
   if (!found468700000) throw new Error('엑셀 I열에 84B타입 1층 분양가(468,700,000) 없음 - 표 중간 끊김 복구 실패');
   if (!found353600000) throw new Error('엑셀 I열에 59A타입 1층 분양가(353,600,000) 없음');

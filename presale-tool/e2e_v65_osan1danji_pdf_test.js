@@ -69,7 +69,7 @@ const ExcelJS = require('exceljs');
     const code = row.getCell(5).value; // E열 = 약식표기(타입 코드)
     if (code === '84D') {
       found84D = true;
-      if (row.getCell(9).value === 746000000) found84D2f = true; // I열 = 분양가(84D 2층)
+      if (row.getCell(9).value === 746000) found84D2f = true; // I열 = 분양가(84D 2층), 29차 후속7부터 천원 단위
     }
   });
   if (!found84D) throw new Error('엑셀 E열(약식표기)에 84D 타입 행 없음');

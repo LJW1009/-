@@ -65,7 +65,7 @@ async function main() {
   // 1. 청약 현황 블록(구 T~AB)이 완전히 삭제됐다 - 메인 표는 S(19)열에서 끝나고,
   // S와 이자 계산 표(V~AC) 사이(T,U=20,21열)는 완전히 빈 칸이다.
   check('R01', '헤더가 S(19)열에서 끝남(구 특별공급/비고/청약일정등 열 없음)',
-    ws.getCell('S6').value === '총\n평당가' && ws.getCell('T6').value == null && ws.getCell('U6').value == null);
+    ws.getCell('S6').value === '총\n평당가(천원)' && ws.getCell('T6').value == null && ws.getCell('U6').value == null);
   check('R02', 'S열 오른쪽에 표 전체를 관통하는 medium 외곽선', bstyle('S6', 'right') === 'medium' && bstyle('S33', 'right') === 'medium');
 
   // 2. 중도금 이자 계산 표가 V(금리)~AC(입주)로 이동, 그 위(5행)에 라벨이 별도로 붙는다.

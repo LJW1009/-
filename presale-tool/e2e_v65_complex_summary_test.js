@@ -68,8 +68,8 @@ async function main() {
   check('CS02', '"*공급평형기준" 안내 문구', ws.getCell('AJ8').value === '*공급평형기준');
   check('CS03', '"총 N 세대수"가 합계 행(H58)을 실시간 참조하는 수식(하드코딩 아님)',
     f('AH9') === '"총 "&H58&" 세대수"');
-  check('CS04', '헤더 2행: "구분(평형)"/"세대수"/"분양가" + "타입"/"전용(평)"/"공급(평)"/"평균"/"평당가"',
-    ws.getCell('AF10').value === '구분(평형)' && ws.getCell('AI10').value === '세대수' && ws.getCell('AJ10').value === '분양가'
+  check('CS04', '헤더 2행: "구분(평형)"/"세대수"/"분양가(천원)" + "타입"/"전용(평)"/"공급(평)"/"평균"/"평당가"',
+    ws.getCell('AF10').value === '구분(평형)' && ws.getCell('AI10').value === '세대수' && ws.getCell('AJ10').value === '분양가(천원)'
       && ws.getCell('AF11').value === '타입' && ws.getCell('AG11').value === '전용(평)' && ws.getCell('AH11').value === '공급(평)'
       && ws.getCell('AJ11').value === '평균' && ws.getCell('AK11').value === '평당가');
   check('CS05', '헤더 병합: AF10:AH10, AI10:AI11, AJ10:AK10',

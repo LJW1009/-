@@ -72,7 +72,7 @@ const ExcelJS = require('exceljs');
   let found84CTop = false;
   ws.eachRow((row) => {
     const code = row.getCell(5).value; // E열 = 약식표기(타입 코드)
-    if (code === '84C' && row.getCell(9).value === 1405020000) found84CTop = true; // I열 = 분양가
+    if (code === '84C' && row.getCell(9).value === 1405020) found84CTop = true; // I열 = 분양가, 29차 후속7부터 천원 단위
   });
   if (!found84CTop) throw new Error('엑셀에 84C타입 "최상층(107동 2,3호, 108동 1,2호)" 행의 분양가(1,405,020,000) 없음');
 

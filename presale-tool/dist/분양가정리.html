@@ -3302,6 +3302,31 @@ function renderEditTab(u) {
     </div>
   </div>`;
 
+  // 합계 그룹 일괄 설정 - 타입 하나씩 같은 글자를 직접 입력하는 대신, 묶을 타입들을
+  // 체크박스로 한 번에 고르고 그룹 이름을 한 번만 입력하면 되도록 한다(사용자 요청 -
+  // 타입이 많을 때 하나씩 똑같은 이름을 입력하는 게 번거로웠음). "적용"을 누르면 아래
+  // 타입별 "합계 그룹(선택)" 칸에 값만 채워 넣을 뿐, 저장 버튼을 눌러야 최종 반영된다
+  // (타입별 칸에서 개별 수정/삭제도 계속 그대로 가능 - 일괄 설정은 그 칸을 채우는
+  // 지름길일 뿐 별도 데이터 경로가 아니다).
+  h += `<div class="edit-section" style="border:1px solid var(--acc)">
+    <div class="edit-sec-title">🏷️ 합계 그룹 일괄 설정</div>
+    <div style="font-size:11px;color:var(--mut);margin-bottom:8px">
+      같이 묶을 타입을 체크하고 그룹 이름을 입력한 뒤 "적용"을 누르면, 체크한 타입들의
+      아래 "합계 그룹(선택)" 칸에 한 번에 같은 이름이 채워집니다. 메인 표 "OO합계"와
+      AF~AK 요약본 마감행 둘 다에 반영됩니다. 저장 버튼을 눌러야 최종 반영됩니다.
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">
+      ${u.types.map((t, ti) => `<label style="display:flex;align-items:center;gap:4px;font-size:12px;padding:3px 8px;background:var(--surf2);border-radius:4px;cursor:pointer">
+        <input type="checkbox" class="group-bulk-chk" data-ti="${ti}"> ${esc(t.code)}
+      </label>`).join('')}
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <input class="edit-in" id="group-bulk-name" placeholder="그룹 이름(예: 115~117)" style="flex:1;min-width:160px">
+      <button type="button" class="btn btn-pri" onclick="applyGroupToSelected()">적용</button>
+      <button type="button" class="btn btn-ghost" onclick="document.querySelectorAll('.group-bulk-chk').forEach(c=>c.checked=false)">체크 해제</button>
+    </div>
+  </div>`;
+
   // 평형별 수정 - 오피스텔은 이 "공급면적" 칸이 실제로는 계약면적(전용+공용)이고, 평당가는
   // 전용면적 기준으로 산정된다(엑셀 내보내기와 동일 기준) - 라벨을 구분해 혼동을 없앤다.
   const isOfficetelEdit = u.kind !== '아파트';
@@ -3375,6 +3400,25 @@ function delRow(ti, ri) {
   const rows = tbody.querySelectorAll('tr');
   if (rows[ri]) rows[ri].remove();
   markDirty();
+}
+
+// 합계 그룹 일괄 설정 - 체크한 타입들의 "합계 그룹(선택)" 입력칸에 한 번에 같은 이름을
+// 채운다. DOM 입력값만 바꾸고(단, 저장 전까지는 unit 데이터 자체는 그대로) markDirty()로
+// 저장 버튼을 활성화한다 - saveEdit()이 그 입력칸들을 읽어 최종 반영하는 기존 경로를
+// 그대로 타므로 별도 데이터 처리가 필요 없다.
+function applyGroupToSelected() {
+  const name = document.getElementById('group-bulk-name')?.value.trim();
+  if (!name) { toast('그룹 이름을 입력해주세요', 'err'); return; }
+  const checked = document.querySelectorAll('.group-bulk-chk:checked');
+  if (!checked.length) { toast('묶을 타입을 하나 이상 체크해주세요', 'err'); return; }
+  checked.forEach(chk => {
+    const input = document.getElementById(`e-group-${chk.dataset.ti}`);
+    if (input) input.value = name;
+  });
+  document.getElementById('group-bulk-name').value = '';
+  checked.forEach(chk => { chk.checked = false; });
+  markDirty();
+  toast(`${checked.length}개 타입에 "${name}" 그룹을 채웠습니다(저장 버튼을 눌러야 최종 반영됩니다)`, 'ok');
 }
 
 function saveEdit() {
@@ -3604,7 +3648,7 @@ function buildSummaryBlock(ws,unit,titleRow,subs,tr){
   ws.mergeCells(r2,SC.type,r2,SC.expy);
   r++;
   const r3=r;
-  sc(SC.type,'구분(평형)',FB9,FSH,AC);sc(SC.units,'세대수',FB9,FSH,AC);sc(SC.price,'분양가',FB9,FSH,AC);
+  sc(SC.type,'구분(평형)',FB9,FSH,AC);sc(SC.units,'세대수',FB9,FSH,AC);sc(SC.price,'분양가(천원)',FB9,FSH,AC);
   r++;
   const r4=r;
   sc(SC.type,'타입',FB9,FSH,AC);sc(SC.expy,'전용(평)',FB9,FSH,AC);sc(SC.suppy,isOfficetel?'계약(평)':'공급(평)',FB9,FSH,AC);
@@ -3632,7 +3676,10 @@ function buildSummaryBlock(ws,unit,titleRow,subs,tr){
     // 전용(평)과 값이 똑같아져 버렸었다), B열에서 직접 환산한다.
     sc(SC.suppy,`=B${s.ds}*0.3025`,FN9,null,AC,NFPY);
     sc(SC.units,`=H${s.sr}`,FN9,null,AC,NF0);
-    sc(SC.price,`=I${s.sr}/10000`,FN9,null,AC,NF0);
+    // 메인 표 I열이 이미 천원 단위이므로(사용자 요청 - 모든 금액 열 천원 통일) 여기서
+    // 다시 나눌 필요 없이 그대로 참조한다(예전엔 원 단위인 I열을 만원 단위로 보이려고
+    // /10000을 했었다).
+    sc(SC.price,`=I${s.sr}`,FN9,null,AC,NF0);
     // 평당가 분모는 종류별 산정 기준(오피스텔=전용, 아파트=계약/공급)에 맞는 이
     // 요약본 자신의 열(AG/AH)을 쓴다 - 오피스텔은 AG(전용), 아파트는 AH(계약/공급)가
     // 곧 메인 표 C열과 같은 값이므로(각 kind에서 서로 같은 기준을 가리킴) 결과는
@@ -3763,8 +3810,8 @@ function buildBlock(ws,unit,startRow){
   const h1r=r;rhi(47.25);
   // 평당가 산정 기준: 아파트는 공급면적(공급평수), 오피스텔은 전용면적(전용평수) 기준.
   const h1l=isOfficetel
-    ? {1:'전용면적',2:'계약\n면적',3:'전용\n평수',4:'공급\n호실수',5:'약식\n표기',6:'동호별',7:'층별',8:'세대수',9:'분양가',10:'평당가',11:'확장비',12:'확장비포함\n분양가',13:'확장비포함\n평당가',14:'시스템\n에어컨',15:'에어컨포함\n분양가',16:'에어컨포함\n평당가',17:'중도금\n이자후불제',18:'중도금이자포함\n총 분양가',19:'총\n평당가'}
-    : {1:'전용면적',2:'공급\n면적',3:'공급\n평수',4:'공급\n세대수',5:'약식\n표기',6:'동호별',7:'층별',8:'세대수',9:'분양가',10:'평당가',11:'확장비',12:'확장비포함\n분양가',13:'확장비포함\n평당가',14:'시스템\n에어컨',15:'에어컨포함\n분양가',16:'에어컨포함\n평당가',17:'중도금\n이자후불제',18:'중도금이자포함\n총 분양가',19:'총\n평당가'};
+    ? {1:'전용면적',2:'계약\n면적',3:'전용\n평수',4:'공급\n호실수',5:'약식\n표기',6:'동호별',7:'층별',8:'세대수',9:'분양가(천원)',10:'평당가(천원)',11:'확장비(천원)',12:'확장비포함\n분양가(천원)',13:'확장비포함\n평당가(천원)',14:'시스템\n에어컨(천원)',15:'에어컨포함\n분양가(천원)',16:'에어컨포함\n평당가(천원)',17:'중도금\n이자후불제(천원)',18:'중도금이자포함\n총 분양가(천원)',19:'총\n평당가(천원)'}
+    : {1:'전용면적',2:'공급\n면적',3:'공급\n평수',4:'공급\n세대수',5:'약식\n표기',6:'동호별',7:'층별',8:'세대수',9:'분양가(천원)',10:'평당가(천원)',11:'확장비(천원)',12:'확장비포함\n분양가(천원)',13:'확장비포함\n평당가(천원)',14:'시스템\n에어컨(천원)',15:'에어컨포함\n분양가(천원)',16:'에어컨포함\n평당가(천원)',17:'중도금\n이자후불제(천원)',18:'중도금이자포함\n총 분양가(천원)',19:'총\n평당가(천원)'};
   // 헤더 라벨 자체는 I~S(금액 열)라도 가운데 정렬한다(실사용 서식 예시 확인 - 오른쪽
   // 정렬은 값이 들어가는 본문/집계 행에만 적용되고 헤더 라벨은 항상 가운데).
   Object.entries(h1l).forEach(([c,v])=>{
@@ -3878,13 +3925,17 @@ function buildBlock(ws,unit,startRow){
       sc(6,dongRunStart[ri]?row.dong:undefined,null,null,AC,null,dongBd(isFirst,dongRunLast[ri]));
       sc(7,row.floor,null,null,AC,null,boxBd(7));
       sc(8,row.units,null,null,AC,null,boxBd(8));
-      sc(9,row.price,null,null,AR,FW,boxBd(9));
+      // 금액 열은 전부 천원 단위로 저장한다(사용자 요청 - 메인 표/요약본 모든 금액 열을
+      // 원 대신 천원 단위로 통일). 여기서 나누는 값(분양가/확장비/에어컨옵션)이 각 열의
+      // "원본" 숫자이고, 나머지 파생 열(평당가/포함분양가/이자 등)은 전부 이 값들로부터
+      // 수식으로 계산되므로 별도로 나눌 필요 없이 자동으로 천원 단위를 따라간다.
+      sc(9,row.price/1000,null,null,AR,FW,boxBd(9));
       sc(10,`=I${r}/${cRef}`,null,null,AR,FW,boxBd(10));
-      if(t.balcony_ext_cost)sc(11,t.balcony_ext_cost,null,null,AR,FW,boxBd(11));
+      if(t.balcony_ext_cost)sc(11,t.balcony_ext_cost/1000,null,null,AR,FW,boxBd(11));
       else sc(11,undefined,null,null,null,null,boxBd(11));
       sc(12,`=I${r}+K${r}`,null,null,AR,FW,boxBd(12));
       sc(13,`=L${r}/${cRef}`,null,null,AR,FW,boxBd(13));
-      if(t.option_cost)sc(14,t.option_cost,null,null,AR,FW,boxBd(14));
+      if(t.option_cost)sc(14,t.option_cost/1000,null,null,AR,FW,boxBd(14));
       else sc(14,undefined,null,null,null,null,boxBd(14));
       sc(15,`=L${r}+N${r}`,null,null,AR,FW,boxBd(15));
       sc(16,`=O${r}/${cRef}`,null,null,AR,FW,boxBd(16));
@@ -3901,7 +3952,7 @@ function buildBlock(ws,unit,startRow){
         const col=DATE_COL0+i, cl=colLetter(col);
         if (isInterestFreeFor(t) || !hasMidDates) { sc(col,0,null,null,AC,FW,BR_BOX_THIN); }
         else {
-          const amt=(i<mids.length&&i<ma.length)?ma[i]:0;
+          const amt=(i<mids.length&&i<ma.length)?ma[i]/1000:0;
           sc(col,`=(${amt}*$${colLetter(RATE_COL)}$${h1r})*(${cl}$${h2r}/365)`,null,null,AC,FW,BR_BOX_THIN);
         }
       }

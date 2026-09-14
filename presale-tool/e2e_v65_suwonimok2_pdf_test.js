@@ -81,7 +81,7 @@ const ExcelJS = require('exceljs');
   let found141BP = false;
   ws.eachRow((row) => {
     const code = row.getCell(5).value; // E열 = 약식표기(타입 코드)
-    if (code === '141BP' && row.getCell(9).value === 2029960000) found141BP = true; // I열 = 분양가
+    if (code === '141BP' && row.getCell(9).value === 2029960) found141BP = true; // I열 = 분양가, 29차 후속7부터 천원 단위
   });
   if (!found141BP) throw new Error('엑셀에 141BP타입 최상층(다락) 분양가(2,029,960,000) 없음');
 

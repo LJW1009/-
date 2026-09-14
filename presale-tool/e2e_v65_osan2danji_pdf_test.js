@@ -74,7 +74,7 @@ const ExcelJS = require('exceljs');
   let found = false;
   ws.eachRow((row) => {
     const v = row.getCell(9).value; // I열 = 분양가
-    if (v === 850100000) found = true;
+    if (v === 850100) found = true; // 29차 후속7: I열 천원 단위(850,100,000원 → 850100)
   });
   if (!found) throw new Error('엑셀 I열에 102타입 2층 분양가(850,100,000) 없음');
 

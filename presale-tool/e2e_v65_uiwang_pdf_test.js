@@ -75,15 +75,16 @@ const ExcelJS = require('exceljs');
   fs.unlinkSync(savePath);
   const ws = wb.worksheets[0];
 
-  // I열(분양가) 어딘가에 36타입 17층 분양가(395,000,000)가 정확히 기록되어 있는지 확인
+  // I열(분양가)은 29차 후속7부터 천원 단위로 저장된다(395,000,000원 → 395000).
+  // 어딘가에 36타입 17층 분양가/84C타입 21층이상 분양가가 정확히 기록되어 있는지 확인.
   let found395 = false, found1098 = false;
   ws.eachRow((row) => {
     const v = row.getCell(9).value; // I열 = 9번째(1-based)
-    if (v === 395000000) found395 = true;
-    if (v === 1098000000) found1098 = true;
+    if (v === 395000) found395 = true;
+    if (v === 1098000) found1098 = true;
   });
-  if (!found395) throw new Error('엑셀 I열에 36타입 17층 분양가(395,000,000) 없음');
-  if (!found1098) throw new Error('엑셀 I열에 84C타입 21층이상 분양가(1,098,000,000) 없음');
+  if (!found395) throw new Error('엑셀 I열에 36타입 17층 분양가(395,000,000 → 천원단위 395000) 없음');
+  if (!found1098) throw new Error('엑셀 I열에 84C타입 21층이상 분양가(1,098,000,000 → 천원단위 1098000) 없음');
 
   if (errors.length) {
     console.log('--- 에러 ---');

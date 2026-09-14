@@ -85,11 +85,11 @@ const ExcelJS = require('exceljs');
     const code = row.getCell(5).value; // E열 = 약식표기(타입 코드)
     if (code === '110C') {
       found110C = true;
-      if (row.getCell(9).value === 628430000) found110C1f = true; // I열 = 분양가
+      if (row.getCell(9).value === 628430) found110C1f = true; // I열 = 분양가, 29차 후속7부터 천원 단위
     }
     if (code === '84B') {
       found84B = true;
-      if (row.getCell(9).value === 518840000) found84B1f = true;
+      if (row.getCell(9).value === 518840) found84B1f = true; // 29차 후속7부터 천원 단위
     }
   });
   if (!found110C) throw new Error('엑셀 E열(약식표기)에 110C 타입 행 없음');
