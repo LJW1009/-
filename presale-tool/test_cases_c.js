@@ -18,7 +18,7 @@ module.exports = [
         '084.9750A  5층  120  10,000,000  350,000,000'
       ].join('\n'), codes);
       const balcony = p.parseBalconySection('084.9750A   14,500,000', codes);
-      const option = p.parseOptionSection('084.9750A   3,200,000', codes);
+      const option = p.parseOptionSection('시스템 에어컨\n084.9750A   3,200,000', codes);
       const meta = p.extractMeta('공고일: 2024.03.10 입주예정월: 2026년 5월');
       return area.length === 1 && price.priceRows.length === 1 &&
         balcony['084.9750A'] === 14500000 && option['084.9750A'] === 3200000 &&
@@ -243,7 +243,7 @@ module.exports = [
     id: 'C24',
     desc: '옵션가 섹션: 여러 코드 동시 처리',
     run: function (p) {
-      const option = p.parseOptionSection('084A  3,200,000\n084B  3,500,000', ['084A', '084B']);
+      const option = p.parseOptionSection('시스템 에어컨\n084A  3,200,000\n084B  3,500,000', ['084A', '084B']);
       return option['084A'] === 3200000 && option['084B'] === 3500000;
     }
   },

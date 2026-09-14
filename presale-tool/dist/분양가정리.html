@@ -1914,6 +1914,60 @@ function dateSerial(dt) {
     return text.slice(0, idx[1]);
   }
 
+  // 옵션(시스템 에어컨) 열은 실제로 "에어컨" 관련 품목이 있을 때만 채운다(실사례: 힐스테이트
+  // 송파더그리드 오피스텔 - "시스템 에어컨" 항목 자체가 문서에 없는데도, 위 두 함수가 "첫
+  // 소제목"이라는 이유만으로 전혀 무관한 품목("현관 컬렉션")의 최저가를 대신 채워 넣고
+  // 있었다 - 확장비처럼 "해당 항목이 없으면 0/빈칸"이 맞는 동작이다). 소제목(번호형/단위
+  // 표기형 둘 다)이 여러 개로 나뉘는 문서는 "에어컨"이 포함된 소제목을 찾아 그 구간만 쓴다.
+  function findSubsectionHeadingBoundaries(text) {
+    var boundaries = [];
+    var reNum = /^\d\)\s*\S/gm;
+    var m;
+    while ((m = reNum.exec(text))) {
+      var lineEnd = text.indexOf('\n', m.index);
+      boundaries.push({ index: m.index, heading: text.slice(m.index, lineEnd < 0 ? text.length : lineEnd) });
+    }
+    var reUnit = /^.{0,80}[(（[]\s*단위\s*[:：][^)）\]]*[)）\]]\s*$/gm;
+    while ((m = reUnit.exec(text))) {
+      var heading = m[0];
+      // "(단위: ...)" 표기가 품목명과 같은 줄이 아니라 그 앞 줄에 따로 떨어져 있는 문서가
+      // 있다(실사례: 힐스테이트 송파더그리드 오피스텔 - "■ 현관 컬렉션 (34A㎡~100B㎡)"
+      // 줄 다음에 "(단위 : 원/VAT 포함)"만 별도 줄로 이어짐). 이 경우 "(단위:...)" 줄만
+      // 보면 품목명이 전혀 안 잡혀 에어컨 여부를 판단할 수 없으므로, 바로 앞 줄까지
+      // 합쳐서 키워드 판별에 쓴다.
+      if (m.index > 0) {
+        var prevLineStart = text.lastIndexOf('\n', m.index - 2) + 1;
+        var prevLine = text.slice(prevLineStart, m.index - 1).trim();
+        if (prevLine) heading = prevLine + ' ' + heading;
+      }
+      boundaries.push({ index: m.index, heading: heading });
+    }
+    boundaries.sort(function (a, b) { return a.index - b.index; });
+    // 같은 줄이 번호형/단위표기형 두 패턴에 동시에 걸리면 같은 인덱스가 중복 등록된다
+    // (실사례: "1) 시스템에어컨 (단위 : 원/...)" 처럼 번호와 단위표기를 함께 쓰는 줄) -
+    // 다음 경계와의 거리를 잴 때 이 중복이 그대로 있으면 "다음 경계"가 자기 자신의
+    // 중복이 되어 구간 길이가 0이 되므로, 인덱스 기준으로 중복을 제거한다.
+    var deduped = [];
+    boundaries.forEach(function (b) {
+      if (!deduped.length || deduped[deduped.length - 1].index !== b.index) deduped.push(b);
+    });
+    return deduped;
+  }
+
+  function restrictToAirconSubsection(text) {
+    var boundaries = findSubsectionHeadingBoundaries(text);
+    // 소제목이 하나 이하(=구분할 근거가 없음)면 기존 로직(전체 텍스트)에 맡긴다.
+    if (boundaries.length < 2) return null;
+    var airconIdx = -1;
+    for (var i = 0; i < boundaries.length; i++) {
+      if (/에어컨/.test(boundaries[i].heading)) { airconIdx = i; break; }
+    }
+    if (airconIdx < 0) return null;
+    var start = boundaries[airconIdx].index;
+    var end = airconIdx + 1 < boundaries.length ? boundaries[airconIdx + 1].index : text.length;
+    return text.slice(start, end);
+  }
+
   // "항 목 타입 품목명 옵션금액 계약금 잔금 비 고"처럼 "타입"이 코드 나열이 아니라 컬럼
   // 이름으로만 쓰이고, 실제 데이터 행은 품목(냉장고/오븐/세탁기 하부장 등)마다 "전 주택형"
   // 같은 코드 아닌 값을 갖는 별개의 카탈로그 표가 뒤이어 나오는 문서가 있다(실사례: 송도국제
@@ -2003,7 +2057,24 @@ function dateSerial(dt) {
   }
 
   function parseOptionSection(text, codes) {
-    return parseAmountByCodeSection(text, codes);
+    var normalized = fixGluedNumbers(despaceKeywords(String(text || '')));
+    var boundaries = findSubsectionHeadingBoundaries(normalized);
+    if (boundaries.length >= 2) {
+      // 소제목이 여러 개로 나뉘는 문서는 "소제목 자체"에 에어컨이 있을 때만 그 구간을
+      // 쓴다. 본문 어딘가(다른 품목의 유의사항 등)에 우연히 "에어컨"이라는 단어가
+      // 나오는 것만으로는 이 옵션표가 에어컨에 관한 것이라 볼 근거가 안 된다(실사례:
+      // 힐스테이트 송파더그리드 오피스텔 - "식탁 펜던트의 경우 에어컨, 외기에 의한
+      // 흔들림이 발생할 수 있으면..."이라는 완전히 무관한 문장 때문에, 전체 텍스트
+      // 기준 검색으로는 "현관 컬렉션" 소제목이 에어컨 관련으로 잘못 채택될 뻔했다).
+      var restricted = restrictToAirconSubsection(normalized);
+      if (!restricted) return {};
+      return parseAmountByCodeSection(restricted, codes);
+    }
+    // 소제목 구분이 없는 단일 옵션표 문서는 표 전체에 "에어컨" 언급이 있을 때만(이미
+    // 검증된 실사례들이 전부 이 형태) 기존처럼 전체를 그대로 쓴다. 언급 자체가 없으면
+    // 확장비와 달리 아무 품목이나 대신 채우면 안 되므로 빈 결과를 반환한다.
+    if (!/에어컨/.test(normalized)) return {};
+    return parseAmountByCodeSection(normalized, codes);
   }
 
   // ---------------------------------------------------------------------

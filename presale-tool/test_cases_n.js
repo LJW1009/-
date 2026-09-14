@@ -59,7 +59,14 @@ module.exports = [
       if (sections.option.indexOf('7,700,000') !== -1) return false;
       var codes = ['84A', '84B', '84C', '110A', '110B', '110C'];
       var opt = p.parseOptionSection(sections.option, codes);
-      return opt['84A'] === 800000;
+      // 29차 후속5: 이 문서엔 "시스템 에어컨" 항목 자체가 없다(정정 전/후 옵션 모두
+      // 냉장고/인덕션류) - parseOptionSection이 에어컨을 못 찾으면 확장비와 달리 아무
+      // 품목이나 대신 채우지 않고 빈 결과를 반환하도록 바뀌었다(실사례: 힐스테이트
+      // 송파더그리드 오피스텔에서 무관한 "현관 컬렉션" 가격이 에어컨 칸에 잘못
+      // 채워지던 문제). 섹션 앵커 자체가 정확한지(정정 전 낡은 값이 안 섞이는지)는
+      // 위 sections.option.indexOf 체크로 이미 검증됐으므로, 여기서는 그 위에서
+      // parseOptionSection이 "에어컨 없음"을 올바르게 판단하는지만 확인한다.
+      return Object.keys(opt).length === 0;
     }
   },
   {

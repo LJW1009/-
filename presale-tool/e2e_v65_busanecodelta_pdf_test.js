@@ -49,10 +49,14 @@ const ExcelJS = require('exceljs');
   for (const code of ['84A', '84B', '84C', '110A', '110B', '110C']) {
     if (!chips.includes(code + ' ✓')) throw new Error('타입 ' + code + '의 세대수 합계가 표기 세대수와 불일치(또는 인식 실패): ' + chips);
   }
-  // "정정 전" 84A 옵션가(7,700,000)가 잘못 채택되지 않고, 실제 본문(정정 반영)의 최저가
-  // 800,000이 정확히 반영되어야 한다.
-  if (!chips.includes('옵션800,000')) throw new Error('84A 옵션 최저가(800,000, 정정 반영된 실제 본문 값)가 분석 칩에 없음(정정 전 낡은 값 7,700,000이 잘못 채택됐을 가능성): ' + chips);
+  // 29차 후속5: 이 문서의 옵션 카탈로그(냉장고/인덕션 등)엔 "시스템 에어컨" 항목이 없다 -
+  // parseOptionSection이 에어컨을 못 찾으면 확장비와 달리 아무 품목이나 대신 채우지 않고
+  // 빈 결과(0)를 반환하도록 바뀌었다(실사례: 힐스테이트 송파더그리드 오피스텔에서 무관한
+  // 품목의 가격이 옵션 칸에 잘못 채워지던 문제). "정정 전" 낡은 값(7,700,000)이든 "정정 후"
+  // 실제 최저가(800,000, 냉장고 패키지)든 어느 쪽도 섞여 들어오면 안 된다.
+  if (!chips.includes('옵션0')) throw new Error('시스템 에어컨이 없는 문서인데 옵션가가 0이 아님(무관한 품목이 잘못 채택됐을 가능성): ' + chips);
   if (chips.includes('7,700,000')) throw new Error('"정정 전" 낡은 옵션가(7,700,000)가 분석 칩에 섞여 들어옴: ' + chips);
+  if (chips.includes('800,000')) throw new Error('무관한 품목(냉장고 패키지 800,000)이 시스템 에어컨 옵션가로 잘못 채택됨: ' + chips);
 
   await page.click('button:has-text("➕ 추가")');
   await page.waitForSelector('#pg-res.on');

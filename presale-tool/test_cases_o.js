@@ -99,14 +99,18 @@ module.exports = [
   },
   {
     id: 'O06',
-    desc: '발코니 확장비/옵션 최저가/메타: 발코니 확장금액(84B 7,470,000/84C 7,540,000), 84B 옵션 최저가(120,000), 실제 공고일(2024.09.06, 승인일 2024.09.05과 다름)과 입주예정(2027년 9월) 정확히 인식',
+    desc: '발코니 확장비/메타: 발코니 확장금액(84B 7,470,000/84C 7,540,000), 실제 공고일(2024.09.06, 승인일 2024.09.05과 다름)과 입주예정(2027년 9월) 정확히 인식 - 옵션은 "시스템 에어컨" 항목 자체가 없어 빈 결과가 맞음(29차 후속5)',
     run: function (p) {
       var sections = p.splitDocumentSections(FULL_TEXT);
       var codes = ['84B', '84C'];
       var bal = p.parseBalconySection(sections.balcony, codes);
+      // 29차 후속5: 이 문서의 옵션 카탈로그(현관중문/아트월/조명/주방특화 등)엔 "시스템
+      // 에어컨" 항목이 없다 - 이전엔 카탈로그의 최저가(120,000, 실제로는 무관한 품목)를
+      // 대신 채웠지만, 에어컨이 없으면 확장비처럼 빈 결과가 맞다(실사례: 힐스테이트
+      // 송파더그리드 오피스텔에서 발견된 문제).
       var opt = p.parseOptionSection(sections.option, codes);
       var meta = p.extractMeta(FULL_TEXT);
-      return bal['84B'] === 7470000 && bal['84C'] === 7540000 && opt['84B'] === 120000
+      return bal['84B'] === 7470000 && bal['84C'] === 7540000 && Object.keys(opt).length === 0
         && meta.open_date && meta.open_date.getFullYear() === 2024 && meta.open_date.getMonth() === 8 && meta.open_date.getDate() === 6
         && meta.move_in_year === 2027 && meta.move_in_month === 9;
     }

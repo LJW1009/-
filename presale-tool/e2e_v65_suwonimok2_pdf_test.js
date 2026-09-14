@@ -47,11 +47,16 @@ const ExcelJS = require('exceljs');
   for (const code of allCodes) {
     if (!chips.includes(code + ' ✓')) throw new Error('타입 ' + code + '의 세대수 합계가 표기 세대수와 불일치(또는 인식 실패): ' + chips);
   }
-  // 84B/84BP 둘 다 페이지 경계에서 끊긴 옵션 카탈로그가 정확히 병합되어 같은 최저가(120,000)여야 한다.
+  // 29차 후속5: 이 문서의 옵션 카탈로그(현관중문/조명/주방특화 등)엔 "시스템 에어컨" 항목이
+  // 없다 - parseOptionSection이 에어컨을 못 찾으면 확장비와 달리 아무 품목이나(예: 84B/84BP가
+  // 페이지 경계 병합으로 공유하던 120,000짜리 품목) 대신 채우지 않고 빈 결과(0)를 반환하도록
+  // 바뀌었다(실사례: 힐스테이트 송파더그리드 오피스텔). 84B/84BP 카탈로그 페이지 경계 병합
+  // 메커니즘 자체는 여전히 살아있고 test_cases_p.js P06(parseBalconySection으로 같은 엔진
+  // 재검증)이 단위 테스트 레벨에서 계속 지킨다.
   const chips84B = chips.slice(chips.indexOf('84B ✓'), chips.indexOf('84C ✓'));
   const chips84BP = chips.slice(chips.indexOf('84BP ✓'));
-  if (!chips84B.includes('옵션120,000')) throw new Error('84B 옵션 최저가(120,000)가 분석 칩에 없음(카탈로그 페이지 경계 병합 실패 가능성): ' + chips84B);
-  if (!chips84BP.includes('옵션120,000')) throw new Error('84BP 옵션 최저가(120,000)가 분석 칩에 없음: ' + chips84BP);
+  if (!chips84B.includes('옵션0')) throw new Error('시스템 에어컨이 없는 문서인데 84B 옵션가가 0이 아님(무관한 품목이 잘못 채택됐을 가능성): ' + chips84B);
+  if (!chips84BP.includes('옵션0')) throw new Error('시스템 에어컨이 없는 문서인데 84BP 옵션가가 0이 아님: ' + chips84BP);
 
   await page.click('button:has-text("➕ 추가")');
   await page.waitForSelector('#pg-res.on');

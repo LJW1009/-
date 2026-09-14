@@ -105,12 +105,14 @@ module.exports = [
   },
   {
     id: 'P06',
-    desc: '옵션 최저가: "84B 인테리어 ... / (페이지 경계) / 타입 항목 위치 품목명 옵션금액 비고사항 / 84BP / 현관 ..."처럼 옵션 카탈로그가 페이지 경계에서 끊기고 다음 페이지에 헤더가 재인쇄된 뒤 코드가 다시 나오는 경우(카탈로그 페이지 헤더 재인쇄 뒤 코드 재출현 병합), 84B와 84BP 둘 다 동일한 최저가(120,000)로 정확히 인식됨(기존에는 84B만 1,480,000으로 잘못 채택되고 정작 더 저렴한 항목은 84BP에게만 돌아갔음)',
+    desc: '카탈로그 페이지 경계 병합: "84B 인테리어 ... / (페이지 경계) / 타입 항목 위치 품목명 옵션금액 비고사항 / 84BP / 현관 ..."처럼 옵션 카탈로그가 페이지 경계에서 끊기고 다음 페이지에 헤더가 재인쇄된 뒤 코드가 다시 나오는 경우(카탈로그 페이지 헤더 재인쇄 뒤 코드 재출현 병합), 84B와 84BP 둘 다 동일한 최저가(120,000)로 정확히 인식됨(기존에는 84B만 1,480,000으로 잘못 채택되고 정작 더 저렴한 항목은 84BP에게만 돌아갔음). 29차 후속5: 이 문서엔 "시스템 에어컨" 항목이 없어 parseOptionSection 자체는 빈 결과가 맞으므로, 병합 메커니즘 자체는 같은 엔진을 쓰는 parseBalconySection으로 검증한다',
     run: function (p) {
       var sections = p.splitDocumentSections(FULL_TEXT);
       var codes = ['84A', '84B', '84C', '84AP', '84BP', '84CP', '115A', '115AP', '116B', '116BP', '139A', '139AP', '141B', '141BP'];
+      var merged = p.parseBalconySection(sections.option, codes);
       var opt = p.parseOptionSection(sections.option, codes);
-      return opt['84A'] === 120000 && opt['84AP'] === 120000 && opt['84B'] === 120000 && opt['84BP'] === 120000;
+      return merged['84A'] === 120000 && merged['84AP'] === 120000 && merged['84B'] === 120000 && merged['84BP'] === 120000
+        && Object.keys(opt).length === 0;
     }
   },
   {

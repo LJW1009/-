@@ -226,6 +226,7 @@ module.exports = [
     desc: 'N안형: 여러 안 중 최소 개소(최저가) 채택',
     run: function (p) {
       var option = p.parseOptionSection([
+        '시스템 에어컨',
         '84O 1안 2 거실+침실1 - 1,400,000',
         '2안 3 거실+침실1+침실2 1,800,000 3,700,000'
       ].join('\n'), ['84O']);
@@ -236,7 +237,7 @@ module.exports = [
     id: 'D26',
     desc: 'N대형: 여러 대수 중 최소 대수(최저가) 채택',
     run: function (p) {
-      var option = p.parseOptionSection('74A 4대 7,270,000\n2대 4,240,000', ['74A']);
+      var option = p.parseOptionSection('시스템 에어컨\n74A 4대 7,270,000\n2대 4,240,000', ['74A']);
       return option['74A'] === 4240000;
     }
   },
@@ -244,7 +245,7 @@ module.exports = [
     id: 'D27',
     desc: '기본/전실형: 기본(최저가) 채택',
     run: function (p) {
-      var option = p.parseOptionSection('84A 기본 거실+주방+침실1 4,800,000\n전실 5개소 6,800,000', ['84A']);
+      var option = p.parseOptionSection('시스템 에어컨\n84A 기본 거실+주방+침실1 4,800,000\n전실 5개소 6,800,000', ['84A']);
       return option['84A'] === 4800000;
     }
   },
@@ -252,7 +253,7 @@ module.exports = [
     id: 'D28',
     desc: '묶음형: 여러 코드가 하나의 금액을 공유',
     run: function (p) {
-      var option = p.parseOptionSection('76, 84A, 84B, 84C, 84D  4대  2,200,000', ['76', '84A', '84B', '84C', '84D']);
+      var option = p.parseOptionSection('시스템 에어컨\n76, 84A, 84B, 84C, 84D  4대  2,200,000', ['76', '84A', '84B', '84C', '84D']);
       return option['76'] === 2200000 && option['84C'] === 2200000;
     }
   },
