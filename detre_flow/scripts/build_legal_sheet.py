@@ -31,8 +31,12 @@ from xml.sax.saxutils import escape
 NSMAIN = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 NSR = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 
-# ── 원본 styles.xml 인덱스 (2026.06 / 품의용 갑지에서 추출) ──────
-S_MON = {                      # 월별 탭 (2026.07 시트 기준)
+# ── 원본 styles.xml 인덱스 fallback (2026.06 / 품의용 갑지에서 추출) ──────
+# ⚠ styles.xml 인덱스는 사용자가 엑셀에서 저장할 때마다 재배치된다.
+#   아래 값은 입력 JSON에 "styles": {"mon": {...}, "pum": {...}} 가 없을 때만
+#   쓰이는 fallback이며, 실제 실행 전에는 CLAUDE.md의 추출 스니펫으로
+#   대상 파일에서 직접 뽑아 JSON에 넣는 것이 원칙이다.
+S_MON_DEFAULT = {              # 월별 탭 (2026.07 시트 기준)
     "title": "404", "title_c": "405",
     "h_a1": "406", "h_a2": "407", "h_b1": "408", "h_b2": "409",
     "h_c1": "364", "h_c2": "365",
@@ -43,7 +47,7 @@ S_MON = {                      # 월별 탭 (2026.07 시트 기준)
     "reason_lbl": "402", "reason_c": "411", "reason_d": "412",
     "impact_c": "400", "impact_d": "401",
 }
-S_PUM = {                      # 품의용 갑지
+S_PUM_DEFAULT = {              # 품의용 갑지
     "hdr": "390", "law": "395",
     "head_c": "391", "head_d": "391",
     "same_c": "392", "same_d": "392",
@@ -83,7 +87,7 @@ def row(idx, height, cells):
 
 
 # ── 월별 탭 ────────────────────────────────────────────────────
-def build_month_sheet(payload, year, month, dept):
+def build_month_sheet(payload, year, month, dept, S_MON):
     rows, merges = [], []
 
     def ht(n, pt=12.1):
@@ -168,7 +172,7 @@ def build_month_sheet(payload, year, month, dept):
 
 
 # ── 품의용 갑지 ────────────────────────────────────────────────
-def build_pum_sheet(payload):
+def build_pum_sheet(payload, S_PUM):
     rows, merges = [], []
 
     def ht(n):
@@ -283,6 +287,14 @@ def main(src, jsn, out):
     if 'name="%s"' % sheet_name in wb:
         raise SystemExit("[%s] 시트가 이미 있습니다." % sheet_name)
 
+    styles = payload.get("styles", {})
+    S_MON = dict(S_MON_DEFAULT, **styles.get("mon", {}))
+    S_PUM = dict(S_PUM_DEFAULT, **styles.get("pum", {}))
+    if not styles:
+        print("⚠ 입력 JSON에 \"styles\" 키가 없어 기본값(fallback)을 사용합니다. "
+              "styles.xml 인덱스가 최신 파일과 다를 수 있으니 CLAUDE.md의 추출 "
+              "스니펫으로 직접 검증하세요.", file=sys.stderr)
+
     used = {int(m) for m in re.findall(r"worksheets/sheet(\d+)\.xml", rels)}
     new_no = max(used) + 1
     new_target = "worksheets/sheet%d.xml" % new_no
@@ -296,8 +308,8 @@ def main(src, jsn, out):
     m = re.search(r'r:id="(rId\d+)"', tail)
     pum_prid = m.group(1) if m else "rId1"
 
-    mrows, mmerges, mlast = build_month_sheet(payload, year, month, dept)
-    prows, pmerges, plast = build_pum_sheet(payload)
+    mrows, mmerges, mlast = build_month_sheet(payload, year, month, dept, S_MON)
+    prows, pmerges, plast = build_pum_sheet(payload, S_PUM)
     month_xml = sheet_xml("A1:D%d" % mlast, COLS_MON, mrows, mmerges, "rId1", 78)
     pum_xml = sheet_xml("B1:D%d" % plast, COLS_PUM, prows, pmerges, pum_prid, 100, fit_h=1)
 
