@@ -31,29 +31,38 @@ from xml.sax.saxutils import escape
 NSMAIN = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 NSR = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 
-# ── 원본 styles.xml 인덱스 fallback (2026.06 / 품의용 갑지에서 추출) ──────
+# ── 원본 styles.xml 인덱스 fallback ──────────────────────────────
 # ⚠ styles.xml 인덱스는 사용자가 엑셀에서 저장할 때마다 재배치된다.
 #   아래 값은 입력 JSON에 "styles": {"mon": {...}, "pum": {...}} 가 없을 때만
 #   쓰이는 fallback이며, 실제 실행 전에는 CLAUDE.md의 추출 스니펫으로
 #   대상 파일에서 직접 뽑아 JSON에 넣는 것이 원칙이다.
-S_MON_DEFAULT = {              # 월별 탭 (2026.07 시트 기준)
-    "title": "404", "title_c": "405",
-    "h_a1": "406", "h_a2": "407", "h_b1": "408", "h_b2": "409",
-    "h_c1": "364", "h_c2": "365",
-    "dept": "403", "law": "410",
+#
+#   2026-09-14, 실제 통합 보고서.xlsx(품의용 갑지 · 2026.07/08 영업계획팀)
+#   에서 styles.xml의 폰트 색상·굵기·정렬까지 직접 읽어 아래 값으로 갱신함.
+#   head_c/head_d(151594 남색 볼드)·same_c/d(444444 회색)·chg_c/d(FF0000/
+#   0000CD)·impact_c/d(FF0000 볼드)까지 CLAUDE.md가 정의한 색상과 전부
+#   일치함을 확인했다. 단 S_PUM_DEFAULT["impact_c"/"impact_d"]는 현재 품의용
+#   갑지에 "당사와 관련없음"류 행이 남아있지 않아 대응하는 스타일을 찾지
+#   못했다 — reason 스타일(볼드 회색)을 임시로 대입해두었으니, 실제로 쓰기
+#   전에 반드시 결과 파일을 열어 눈으로 확인할 것.
+S_MON_DEFAULT = {
+    "title": "401", "title_c": "402",
+    "h_a1": "403", "h_a2": "404", "h_b1": "405", "h_b2": "406",
+    "h_c1": "395", "h_c2": "365",
+    "dept": "400", "law": "407",
     "head_c": "387", "head_d": "377",
-    "same_c": "388", "same_d": "378",
-    "chg_c": "389", "chg_d": "380",
-    "reason_lbl": "402", "reason_c": "411", "reason_d": "412",
-    "impact_c": "400", "impact_d": "401",
+    "same_c": "396", "same_d": "397",
+    "chg_c": "398", "chg_d": "399",
+    "reason_lbl": "361", "reason_c": "408", "reason_d": "409",
+    "impact_c": "413", "impact_d": "414",
 }
-S_PUM_DEFAULT = {              # 품의용 갑지
-    "hdr": "390", "law": "395",
+S_PUM_DEFAULT = {
+    "hdr": "390", "law": "410",
     "head_c": "391", "head_d": "391",
-    "same_c": "392", "same_d": "392",
-    "chg_c": "393", "chg_d": "394",
-    "reason_lbl": "399", "reason_c": "396", "reason_d": "397",
-    "impact_c": "398", "impact_d": "398",
+    "same_c": "391", "same_d": "391",
+    "chg_c": "392", "chg_d": "393",
+    "reason_lbl": "394", "reason_c": "411", "reason_d": "412",
+    "impact_c": "411", "impact_d": "412",   # ⚠ 미확인 — reason 스타일 임시 대입
 }
 
 W_MON = {"C": 94.125, "D": 96.375}
