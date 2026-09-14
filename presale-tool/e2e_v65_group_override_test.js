@@ -113,6 +113,17 @@ async function main() {
     fail++; console.log('[FAIL] G05: A그룹 마감행을 찾을 수 없음');
   }
 
+  // 29차 후속: 그룹 합계 행은 표 맨 끝에 몰아서 쓰지 않고, 그 그룹의 타입들이 끝나는
+  // 자리 바로 다음(다음 그룹 첫 타입이 나오기 전)에 곧장 나와야 한다(실사용 서식 예시
+  // 확인 - "1군합계"가 42A보다 먼저 나오는 등). "A그룹합계" 행이 "84A"(다음 그룹 첫
+  // 타입, E열=코드)보다 앞에 있어야 한다.
+  const groupRowIdx = colA.indexOf('A그룹합계');
+  const codeCol = [];
+  for (let r = 1; r <= ws.rowCount; r++) codeCol.push(ws.getCell(r, 5).value);
+  const type84AIdx = codeCol.indexOf('84A');
+  check('G06', '"A그룹합계" 행이 84A(다음 그룹 첫 타입)보다 먼저 나옴(그룹 합계를 표 끝에 몰아쓰지 않고 해당 그룹 바로 뒤에 배치)',
+    groupRowIdx !== -1 && type84AIdx !== -1 && groupRowIdx < type84AIdx);
+
   console.log(`[e2e_v65_group_override_test.js] ${pass}/${pass+fail} 통과`);
   if (errors.length) console.log('브라우저 에러:', errors);
   if (fail > 0 || errors.length) process.exit(1);

@@ -1836,8 +1836,52 @@ function buildBlock(ws,unit,startRow){
   for(let cn=1;cn<=19;cn++)ws.mergeCells(h1r,cn,h2r,cn);
   ws.mergeCells(h1r,RATE_COL,h2r,RATE_COL);
   r++;
+  // 같은 평형(약식표기 앞자리 숫자)대 여러 타입을 묶은 그룹 합계 행 ("84합계" 등)은
+  // 타입 목록에서 그 그룹의 타입들이 끝나는 자리 바로 다음에 곧장 배치한다(실사용 서식
+  // 예시 확인 - 예: "1군"의 마지막 타입 소계 바로 아래에 "1군합계"가 오고, 그다음
+  // "2군" 첫 타입이 이어진다. 모든 그룹 합계 행을 표 맨 끝에 몰아서 쓰던 이전 방식은
+  // 전체 표와 정리표(AF~AK, 이미 같은 방식으로 그룹마다 바로 마감행을 씀)의 그룹 경계가
+  // 서로 어긋나 보인다는 사용자 피드백의 원인이었다). 타입 코드의 숫자 접두부만으로는
+  // 부족한 단지도 있다(실사례: 목동윤슬자이 오피스텔 - 115A/114B/114C처럼 접두부가
+  // 전부 달라 자동으로는 묶이지 않지만, 실제로는 같은 크기대 타입이라 사용자가 하나로
+  // 묶어달라고 직접 지정한 경우). 이럴 때 타입 데이터에 group_key(묶을 기준값)/
+  // group_label(그룹 라벨, 생략 시 group_key 그대로)를 미리 심어두면 그 값으로 묶고,
+  // 없으면 기존 숫자 접두부 규칙 그대로 쓴다(대부분의 문서는 이 필드가 없으므로 회귀 없음).
+  function gkeyOf(t){return t.group_key!=null?String(t.group_key):(String(t.code).match(/^\d+/)||[t.code])[0];}
+  function writeGroupRow(mem){
+    // 같은 평형대 타입이 하나뿐이면(예: 74A 혼자) 그 타입의 소계와 완전히 똑같은 값이
+    // 되어 중복이므로, 실사용 서식 예시에서 확인된 대로 그룹합계 행 자체를 만들지 않는다.
+    if(mem.length<2)return;
+    const gkey=gkeyOf(mem[0].t);
+    const glabel=mem[0].t.group_label!=null?mem[0].t.group_label:gkey;
+    const gr=r;rhi(16.9);
+    fillSummaryRow(FGT);
+    // "OO합계" 라벨은 A~B(1~2열)만 병합한다 - C열부터는 실제 값이 있으므로 B열
+    // 오른쪽에는 구분선이 필요하다(소계 행의 A~D 병합과 다른 점).
+    sc(1,glabel+'합계',FB,FGT,AC,null,{left:BMED,top:BTHIN,bottom:BTHIN});
+    sc(2,undefined,null,FGT,null,null,{top:BTHIN,bottom:BTHIN,right:BTHIN});
+    sc(8,`=${mem.map(m=>'H'+m.sr).join('+')}`,FB,FGT,AC,null,boxBd(8));
+    // C(평당가 분모)는 표기 공급세대수(D)로, D는 실제 합산세대수(H)로 가중평균한다
+    // (실사용 서식 예시 그대로 - I~S는 아래에서 전부 H로 가중평균).
+    sc(3,`=(${mem.map(m=>`$D$${m.ds}*C${m.ds}`).join('+')})/$H$${gr}`,FB,FGT,AC,'#,##0.00',boxBd(3));
+    sc(4,`=H${gr}`,FB,FGT,AC,null,boxBd(4));
+    ['I','J','K','L','M','N','O','P','Q','R','S'].forEach(cl=>{
+      const col=cl.charCodeAt(0)-64;
+      sc(col,`=(${mem.map(m=>`H${m.sr}*${cl}${m.sr}`).join('+')})/H${gr}`,FB,FGT,alignFor(col),FW,boxBd(col));
+    });
+    ws.mergeCells(gr,1,gr,2);
+    r++;
+  }
   const fd=r,subs=[];
+  let currentRun=[];
   for(const t of unit.types){
+    // 그룹 경계 판정과 마감 행 삽입은 이 타입 자신의 행을 쓰기 "전"에 해야 한다 - 뒤에
+    // 하면 이미 다음 그룹 타입의 행이 앞에 써진 뒤라 마감 행이 엉뚱한 자리(다음 그룹
+    // 첫 타입 뒤)에 끼어든다.
+    if(currentRun.length&&gkeyOf(currentRun[currentRun.length-1].t)!==gkeyOf(t)){
+      writeGroupRow(currentRun);
+      currentRun=[];
+    }
     const ds=r;
     const lastRi=t.rows.length-1;
     const dongVals=t.rows.map(row=>row.dong||'');
@@ -1940,48 +1984,10 @@ function buildBlock(ws,unit,startRow){
     sc(18,`=Q${sr}+O${sr}`,FB,FSB,AR,FW,boxBd(18));
     sc(19,`=R${sr}/${cRefT}`,FB,FSB,AR,FW,boxBd(19));
     ws.mergeCells(sr,1,sr,4);
-    subs.push({t,ds,sr});r++;
+    const s={t,ds,sr};subs.push(s);r++;
+    currentRun.push(s);
   }
-  // 같은 평형(약식표기 앞자리 숫자)대 여러 타입을 묶은 그룹 합계 행 ("84합계" 등).
-  // 실사례 엑셀에서 확인된 패턴: 타입 소계들과는 별도로, 동일 평형 그룹끼리 다시
-  // 가중평균한 행을 추가해 비교하기 쉽게 한다(최종 "합계" 행은 이 그룹 행이 아니라
-  // 타입별 소계에서 직접 집계 - 그룹 행은 참고용 중간 집계일 뿐).
-  // 타입 코드의 숫자 접두부만으로는 부족한 단지도 있다(실사례: 목동윤슬자이 오피스텔 -
-  // 115A/114B/114C처럼 접두부가 전부 달라 자동으로는 묶이지 않지만, 실제로는 같은 크기대
-  // 타입이라 사용자가 하나로 묶어달라고 직접 지정한 경우). 이럴 때 타입 데이터에
-  // group_key(묶을 기준값)/group_label(그룹 라벨, 생략 시 group_key 그대로)를 미리
-  // 심어두면 그 값으로 묶고, 없으면 기존 숫자 접두부 규칙 그대로 쓴다(대부분의 문서는
-  // 이 필드가 없으므로 회귀 없음).
-  const groupOrder=[],groups={};
-  subs.forEach(s=>{
-    const gkey=(s.t.group_key!=null?String(s.t.group_key):(String(s.t.code).match(/^\d+/)||[s.t.code])[0]);
-    if(!groups[gkey]){groups[gkey]=[];groupOrder.push(gkey);}
-    groups[gkey].push(s);
-  });
-  groupOrder.forEach(gkey=>{
-    const mem=groups[gkey];
-    // 같은 평형대 타입이 하나뿐이면(예: 74A 혼자) 그 타입의 소계와 완전히 똑같은 값이
-    // 되어 중복이므로, 실사용 서식 예시에서 확인된 대로 그룹합계 행 자체를 만들지 않는다.
-    if(mem.length<2)return;
-    const glabel=mem[0].t.group_label!=null?mem[0].t.group_label:gkey;
-    const gr=r;rhi(16.9);
-    fillSummaryRow(FGT);
-    // "OO합계" 라벨은 A~B(1~2열)만 병합한다 - C열부터는 실제 값이 있으므로 B열
-    // 오른쪽에는 구분선이 필요하다(소계 행의 A~D 병합과 다른 점).
-    sc(1,glabel+'합계',FB,FGT,AC,null,{left:BMED,top:BTHIN,bottom:BTHIN});
-    sc(2,undefined,null,FGT,null,null,{top:BTHIN,bottom:BTHIN,right:BTHIN});
-    sc(8,`=${mem.map(m=>'H'+m.sr).join('+')}`,FB,FGT,AC,null,boxBd(8));
-    // C(평당가 분모)는 표기 공급세대수(D)로, D는 실제 합산세대수(H)로 가중평균한다
-    // (실사용 서식 예시 그대로 - I~S는 아래에서 전부 H로 가중평균).
-    sc(3,`=(${mem.map(m=>`$D$${m.ds}*C${m.ds}`).join('+')})/$H$${gr}`,FB,FGT,AC,'#,##0.00',boxBd(3));
-    sc(4,`=H${gr}`,FB,FGT,AC,null,boxBd(4));
-    ['I','J','K','L','M','N','O','P','Q','R','S'].forEach(cl=>{
-      const col=cl.charCodeAt(0)-64;
-      sc(col,`=(${mem.map(m=>`H${m.sr}*${cl}${m.sr}`).join('+')})/H${gr}`,FB,FGT,alignFor(col),FW,boxBd(col));
-    });
-    ws.mergeCells(gr,1,gr,2);
-    r++;
-  });
+  writeGroupRow(currentRun);
   const tr=r;rhi(17.25);
   fillSummaryRow(FTT,true);
   // "합계" 라벨도 A~B만 병합(그룹합계와 동일 - C열부터 실제 값이 있어 B열 오른쪽 구분선 필요).
