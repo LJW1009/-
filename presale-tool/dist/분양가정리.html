@@ -3243,7 +3243,7 @@ function renderSummary(u) {
         <span class="tcode">${t.code}</span>
         <span class="tmeta">전용 ${t.exclusive_area}㎡${isOfficetel?` (${pyeong.toFixed(2)}평)`:''} · ${isOfficetel?'계약':'공급'} ${t.supply_area}㎡${isOfficetel?'':` (${pyeong.toFixed(2)}평)`}</span>
         <span class="tok" style="color:${ok?'var(--grn)':'var(--red)'}">${ok?'✓ '+tot+'세대':'⚠ 표기'+t.supply_units+'/합산'+tot}</span>
-        <span class="textras">확장비 ${t.balcony_ext_cost.toLocaleString()}원 · 에어컨 ${t.option_cost.toLocaleString()}원</span>
+        <span class="textras">확장비 ${t.balcony_ext_cost.toLocaleString()}원 · 에어컨 ${t.option_cost.toLocaleString()}원${t.interest?` · 중도금 ${t.interest}(이 타입만 단지 전체와 다름)`:''}${(t.group_label||t.group_key)?` · 합계그룹 "${t.group_label||t.group_key}"`:''}</span>
       </div>
       <table><thead><tr>
         <th>동/라인</th><th>층구분</th><th>세대</th>
