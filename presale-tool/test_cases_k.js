@@ -66,11 +66,11 @@ module.exports = [
     desc: 'pdf.js 재배치로 "공급금액 및 납부일정" 제목 뒤에 실제 공급면적표 본문이 섞여 들어간 경우에도, "(단위:...㎡...)"/"(단위:...원...)" 두 표 고유 단위표기를 2차 경계로 삼아 area/price 섹션을 정확히 복구',
     run: function (p) {
       var sections = p.splitDocumentSections(FULL_TEXT);
-      var area = p.parseAreaSection(sections.area);
+      var area = p.parseAreaSection(sections.area, true);
       var codes = area.map(function (x) { return x.code; });
       var a = area.find(function (x) { return x.code === '84OA'; });
       return area.length === 8 && codes.indexOf('84OH') !== -1
-        && !!a && a.exclusive_area === 84.84 && a.supply_area === 126.7242 && a.supply_units === 2;
+        && !!a && a.exclusive_area === 84.84 && a.supply_area === 175.042 && a.supply_units === 2;
     }
   },
   {
@@ -78,7 +78,7 @@ module.exports = [
     desc: '복구된 price 섹션에는 잘못 섞여든 공급면적표가 남아있지 않고, 실제 공급금액표만 정확히 인식',
     run: function (p) {
       var sections = p.splitDocumentSections(FULL_TEXT);
-      var area = p.parseAreaSection(sections.area);
+      var area = p.parseAreaSection(sections.area, true);
       var codes = area.map(function (x) { return x.code; });
       var price = p.parsePriceSection(sections.price, codes);
       var r = price.priceRows.find(function (x) { return x.code === '84OA' && x.floor.raw === '5층'; });

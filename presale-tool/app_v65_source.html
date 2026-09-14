@@ -1083,7 +1083,7 @@ function doParse() {
   saveForm();
   const f = readForm();
   if (!f.name) { toast('단지명을 입력해주세요', 'err'); return null; }
-  const areaTypes = parseAreaSection(f.taArea);
+  const areaTypes = parseAreaSection(f.taArea, f.kind !== '아파트');
   if (!areaTypes.length) { toast('② 공급면적 표를 인식하지 못했습니다', 'warn'); return null; }
   const codes = areaTypes.map(t => t.code);
   const { midDates, priceRows } = parsePriceSection(f.taPrice, codes);
@@ -1643,6 +1643,7 @@ function setCell(ws,r,c,v,f,fi,a,nf,bd){
 //     패턴(그 단지 자신의 마감행 참조)으로 통일했다.
 function buildSummaryBlock(ws,unit,titleRow,subs,tr){
   const SC={type:32,expy:33,suppy:34,units:35,price:36,pypy:37};
+  const isOfficetel=unit.kind!=='아파트';
   let r=titleRow+5;
   function sc(c,v,f,fi,a,nf){setCell(ws,r,c,v,f,fi,a,nf,BR_BOX_THIN);}
   const NFPY='0.0"평"',NF0='#,##0';
@@ -1660,7 +1661,7 @@ function buildSummaryBlock(ws,unit,titleRow,subs,tr){
   sc(SC.type,'구분(평형)',FB9,FSH,AC);sc(SC.units,'세대수',FB9,FSH,AC);sc(SC.price,'분양가',FB9,FSH,AC);
   r++;
   const r4=r;
-  sc(SC.type,'타입',FB9,FSH,AC);sc(SC.expy,'전용(평)',FB9,FSH,AC);sc(SC.suppy,'공급(평)',FB9,FSH,AC);
+  sc(SC.type,'타입',FB9,FSH,AC);sc(SC.expy,'전용(평)',FB9,FSH,AC);sc(SC.suppy,isOfficetel?'계약(평)':'공급(평)',FB9,FSH,AC);
   sc(SC.price,'평균',FB9,FSH,AC);sc(SC.pypy,'평당가',FB9,FSH,AC);
   ws.mergeCells(r3,SC.type,r3,SC.suppy);ws.mergeCells(r3,SC.units,r4,SC.units);ws.mergeCells(r3,SC.price,r3,SC.pypy);
   r++;
@@ -1679,10 +1680,16 @@ function buildSummaryBlock(ws,unit,titleRow,subs,tr){
   function writeTypeRow(s){
     sc(SC.type,s.t.code,FN9,null,AC);
     sc(SC.expy,`=A${s.ds}*0.3025`,FN9,null,AC,NFPY);
-    sc(SC.suppy,`=C${s.ds}`,FN9,null,AC,NFPY);
+    // 메인 표 C열은 평당가 산정 기준(오피스텔=전용, 아파트=공급)이라 종류에 따라 서로
+    // 다른 값을 담는다. 이 칸은 그와 별개로 항상 "B열(계약/공급면적) 자체의 평수"를 그대로
+    // 보여줘야 하므로(실사례로 확인된 라벨-값 불일치 - 오피스텔에서 C열을 그대로 참조하면
+    // 전용(평)과 값이 똑같아져 버렸었다), B열에서 직접 환산한다.
+    sc(SC.suppy,`=B${s.ds}*0.3025`,FN9,null,AC,NFPY);
     sc(SC.units,`=H${s.sr}`,FN9,null,AC,NF0);
     sc(SC.price,`=I${s.sr}/10000`,FN9,null,AC,NF0);
-    sc(SC.pypy,`=${colLetter(SC.price)}${r}/${colLetter(SC.suppy)}${r}`,FN9,null,AC,NF0);
+    // 평당가는 위 표시용 값(AH)이 아니라 메인 표 자체의 평당가 산정 기준 열(C)로 나눠야
+    // 종류별 기준(오피스텔=전용, 아파트=공급)이 항상 메인 표와 일치한다.
+    sc(SC.pypy,`=${colLetter(SC.price)}${r}/C${s.ds}`,FN9,null,AC,NF0);
   }
 
   const closingRows=[];
@@ -1726,7 +1733,9 @@ function buildSummaryBlock(ws,unit,titleRow,subs,tr){
     sc(SC[key],`=(${terms})/${uDenomAvg}`,FB9,FSA,AC,nf);
   });
   sc(SC.units,`=${closingRows.map(cr=>`${colLetter(SC.units)}${cr}`).join('+')}`,FB9,FSA,AC,NF0);
-  sc(SC.pypy,`=${colLetter(SC.price)}${avgRow}/${colLetter(SC.suppy)}${avgRow}`,FB9,FSA,AC,NF0);
+  // 전체 평균 평당가도 종류별 산정 기준(오피스텔=전용, 아파트=계약/공급)에 맞는 평균 열로
+  // 나눈다 - AH(계약/공급 평균)를 오피스텔에 그대로 쓰면 기준이 어긋난다.
+  sc(SC.pypy,`=${colLetter(SC.price)}${avgRow}/${colLetter(isOfficetel?SC.expy:SC.suppy)}${avgRow}`,FB9,FSA,AC,NF0);
 }
 function buildBlock(ws,unit,startRow){
   let r=startRow;

@@ -47,15 +47,17 @@ var META_TEXT = '「건축물의 분양에 관한 법률」 제5조 및 시행�
 module.exports = [
   {
     id: 'F01',
-    desc: '실사례 공급대상표: 같은 전용/공급면적을 공유하는 8개 타입(84OA~84OH) 전부 인식, 총계행("계 24")은 제외',
+    desc: '실사례 공급대상표: 같은 전용/공급면적을 공유하는 8개 타입(84OA~84OH) 전부 인식, 총계행("계 24")은 제외 - 오피스텔 계약면적(소계+기타공용면적)까지 확장 인식(29차 후속)',
     run: function (p) {
-      var area = p.parseAreaSection(AREA_TEXT);
+      var area = p.parseAreaSection(AREA_TEXT, true);
       var codes = area.map(function (a) { return a.code; });
       var a = area.find(function (x) { return x.code === '84OA'; });
       var h = area.find(function (x) { return x.code === '84OH'; });
+      // supply_area는 소계(공급면적, 126.7242/128.3178)가 아니라 오피스텔 표기 관행상 최종
+      // 계약면적(소계+기타공용면적, 175.0420/176.6130)이어야 한다 - 실사례로 확인된 규칙.
       return area.length === 8
-        && a && a.exclusive_area === 84.84 && a.supply_area === 126.7242 && a.supply_units === 2
-        && h && h.exclusive_area === 84.8 && h.supply_area === 128.3178 && h.supply_units === 4
+        && a && a.exclusive_area === 84.84 && a.supply_area === 175.042 && a.supply_units === 2
+        && h && h.exclusive_area === 84.8 && h.supply_area === 176.613 && h.supply_units === 4
         && codes.indexOf('24') === -1; // 총계행 숫자가 코드로 오인되지 않음
     }
   },
@@ -63,7 +65,7 @@ module.exports = [
     id: 'F02',
     desc: '실사례 가격표: 계약금 2회분납+부가세 헤더(회차 라벨이 밀리고 중복돼도) 16개 행 전부 인식',
     run: function (p) {
-      var area = p.parseAreaSection(AREA_TEXT);
+      var area = p.parseAreaSection(AREA_TEXT, true);
       var codes = area.map(function (a) { return a.code; });
       var price = p.parsePriceSection(PRICE_TEXT, codes);
       return price.priceRows.length === 16 && price.unit_mult === 1;

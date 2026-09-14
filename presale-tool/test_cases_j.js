@@ -57,14 +57,16 @@ var META_TEXT = [
 module.exports = [
   {
     id: 'J01',
-    desc: '실사례 공급면적: "84E1-T"처럼 숫자+영문 뒤에 하이픈+영문 접미사가 붙는 타입코드도 코드 경계로 인식',
+    desc: '실사례 공급면적: "84E1-T"처럼 숫자+영문 뒤에 하이픈+영문 접미사가 붙는 타입코드도 코드 경계로 인식 - 오피스텔 계약면적(소계+기타공용면적)까지 확장 인식(29차 후속)',
     run: function (p) {
-      var area = p.parseAreaSection(AREA_TEXT);
+      var area = p.parseAreaSection(AREA_TEXT, true);
       var codes = area.map(function (x) { return x.code; });
       var t = area.find(function (x) { return x.code === '84E1-T'; });
+      // supply_area는 소계(공급면적, 127.98)가 아니라 오피스텔 표기 관행상 최종 계약면적
+      // (소계+기타공용면적, 197.26)이어야 한다 - 실사례로 확인된 규칙.
       return area.length === 10
         && codes.indexOf('84E1-T') !== -1 && codes.indexOf('84E2-T') !== -1
-        && t && t.exclusive_area === 84.57 && t.supply_area === 127.98 && t.supply_units === 16;
+        && t && t.exclusive_area === 84.57 && t.supply_area === 197.26 && t.supply_units === 16;
     }
   },
   {

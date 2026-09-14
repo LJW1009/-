@@ -423,7 +423,7 @@ function dateSerial(dt) {
  * 분양가 정리 도구 - 파서 모듈 (Agent A)
  *
  * Contract:
- *   parseAreaSection(text)                      -> [{code, exclusive_area, supply_area, supply_units}]
+ *   parseAreaSection(text, isOfficetel?)         -> [{code, exclusive_area, supply_area, supply_units}]
  *   parsePriceSection(text, codes, baseDate?)    -> {midDates, priceRows, unit_mult}
  *   parseBalconySection(text, codes)             -> {code: amount}
  *   parseOptionSection(text, codes)              -> {code: amount}
@@ -730,7 +730,7 @@ function dateSerial(dt) {
         for (var k = 0; k < floats.length; k++) {
           if (k === i || k === j) continue;
           if (Math.abs(floats[k].v - sum) <= 0.02 && (!best || floats[k].v < best.c)) {
-            best = { a: floats[i].v, b: floats[j].v, c: floats[k].v };
+            best = { a: floats[i].v, b: floats[j].v, c: floats[k].v, ai: i, bi: j, ci: k };
           }
         }
       }
@@ -738,11 +738,34 @@ function dateSerial(dt) {
     return best;
   }
 
+  // 오피스텔 문서 중에는 "전용+공용=소계(공급면적)"에서 한 단계 더 나아가
+  // "소계+기타공용면적(주차장면적 포함)=계약면적"까지 누적되는 표가 있다(실사례: 힐스테이트
+  // 송파더그리드 오피스텔 - 공급호실 34.9930 15.2004 50.1934 30.2670 80.4604 10.4468 순서로
+  // 전용/공용/소계/기타공용/계약면적/대지지분이 이어진다). 이 경우 findAreaTriple이 찾는
+  // 가장 안쪽 합(소계=50.1934)은 오피스텔 문서가 실제로 표기하는 "계약면적"(80.4604)이
+  // 아니다. 표 헤더에 "계약면적"이라는 단어가 실제로 등장할 때만(문서 구조 자체가 증거)
+  // 안쪽 triple을 이미 사용한 세 값(전용/공용/소계)과는 다른 새 두 값(기타공용/계약면적)으로
+  // 한 단계 더 확장을 시도한다 - 대지지분처럼 우연히 다른 합과 맞아떨어지는 값까지 이미 쓴
+  // 인덱스로 제한해 오탐을 막는다.
+  function findOuterAreaExtension(floats, inner) {
+    var used = {};
+    used[inner.ai] = used[inner.bi] = used[inner.ci] = true;
+    for (var j = 0; j < floats.length; j++) {
+      if (used[j]) continue;
+      var sum = floats[inner.ci].v + floats[j].v;
+      for (var k = 0; k < floats.length; k++) {
+        if (k === inner.ci || used[k] || k === j) continue;
+        if (Math.abs(floats[k].v - sum) <= 0.02) return floats[k].v;
+      }
+    }
+    return null;
+  }
+
   // 한 주택형 분량의 토큰 조각에서 {code, exclusive_area, supply_area, supply_units}를 추출.
   // 세그먼트 경계가 느슨해 앞/뒤 다른 주택형의 꼬리 토큰이 약간 섞여 들어와도,
   // "면적값 이후 첫 정수 우선, 없으면 면적값 이전 마지막 정수"와 "코드 숫자 접두부에 가장
   // 가까운 면적값" 규칙 덕분에 실제 값이 안정적으로 골라진다.
-  function extractAreaFromTokens(toks) {
+  function extractAreaFromTokens(toks, preferContractArea) {
     var floats = [];
     var ints = [];
     for (var k = 0; k < toks.length; k++) {
@@ -805,6 +828,10 @@ function dateSerial(dt) {
     if (triple) {
       exclusive_area = Math.max(triple.a, triple.b);
       supply_area = triple.c;
+      if (preferContractArea) {
+        var outer = findOuterAreaExtension(floats, triple);
+        if (outer != null) supply_area = outer;
+      }
     } else {
       var codeNum = parseFloat((code.match(/\d+/) || [])[0]);
       var byAsc = floats.slice().sort(function (a, b) { return a.v - b.v; });
@@ -850,9 +877,15 @@ function dateSerial(dt) {
     return out;
   }
 
-  function parseAreaSection(text) {
+  function parseAreaSection(text, isOfficetel) {
     text = fixGluedNumbers(String(text || '').replace(/㎡/g, ' '));
     text = fixGluedSubCodesFromFootnote(text);
+    // "전용+공용=소계(공급면적), 소계+기타공용면적=계약면적"처럼 두 단계로 누적되는 표는
+    // 아파트/오피스텔 모두에 나온다(실사례: 의왕역 SK VIEW 아파트도 이 구조를 그대로 씀) -
+    // "계약면적"이라는 단어의 등장 여부만으로는 어느 단계를 원하는지 구분할 수 없다. 오피스텔은
+    // 관행상 계약면적(바깥쪽, 기타공용면적까지 포함)을, 아파트는 공급면적(안쪽, 소계)을 쓰므로
+    // isOfficetel(사용자가 폼에서 고른 단지 종류)로만 판단한다.
+    var preferContractArea = !!isOfficetel && /계약면적/.test(text);
     var tokens = text.split(/\s+/).filter(Boolean);
     tokens = reglueSplitShortCodes(tokens);
 
@@ -909,7 +942,7 @@ function dateSerial(dt) {
         if (/공급면적|공급규모|전용면적|관리번호|주택형|호형/.test(line) && !/\d\.\d/.test(line)) return;
         var lineToks = tokenize(line);
         if (lineToks.length < 3) return;
-        var parsed2 = extractAreaFromTokens(lineToks);
+        var parsed2 = extractAreaFromTokens(lineToks, preferContractArea);
         if (parsed2) out2.push(parsed2);
       });
       return out2;
@@ -976,11 +1009,11 @@ function dateSerial(dt) {
         }
       }
       if (segEnd <= segStart) continue;
-      var parsed = extractAreaFromTokens(tokens.slice(segStart, segEnd));
+      var parsed = extractAreaFromTokens(tokens.slice(segStart, segEnd), preferContractArea);
       // 2차 시도(면적먼저형처럼 코드 앞에 전용면적이 오는 경우만): 코드 앞 2칸까지 넓혀 재시도.
       if (!parsed) {
         var segStart2 = Math.max(0, segStart - 2);
-        parsed = extractAreaFromTokens(tokens.slice(segStart2, segEnd));
+        parsed = extractAreaFromTokens(tokens.slice(segStart2, segEnd), preferContractArea);
       }
       if (parsed) out.push(parsed);
     }
@@ -2845,7 +2878,7 @@ function doParse() {
   saveForm();
   const f = readForm();
   if (!f.name) { toast('단지명을 입력해주세요', 'err'); return null; }
-  const areaTypes = parseAreaSection(f.taArea);
+  const areaTypes = parseAreaSection(f.taArea, f.kind !== '아파트');
   if (!areaTypes.length) { toast('② 공급면적 표를 인식하지 못했습니다', 'warn'); return null; }
   const codes = areaTypes.map(t => t.code);
   const { midDates, priceRows } = parsePriceSection(f.taPrice, codes);
@@ -3405,6 +3438,7 @@ function setCell(ws,r,c,v,f,fi,a,nf,bd){
 //     패턴(그 단지 자신의 마감행 참조)으로 통일했다.
 function buildSummaryBlock(ws,unit,titleRow,subs,tr){
   const SC={type:32,expy:33,suppy:34,units:35,price:36,pypy:37};
+  const isOfficetel=unit.kind!=='아파트';
   let r=titleRow+5;
   function sc(c,v,f,fi,a,nf){setCell(ws,r,c,v,f,fi,a,nf,BR_BOX_THIN);}
   const NFPY='0.0"평"',NF0='#,##0';
@@ -3422,7 +3456,7 @@ function buildSummaryBlock(ws,unit,titleRow,subs,tr){
   sc(SC.type,'구분(평형)',FB9,FSH,AC);sc(SC.units,'세대수',FB9,FSH,AC);sc(SC.price,'분양가',FB9,FSH,AC);
   r++;
   const r4=r;
-  sc(SC.type,'타입',FB9,FSH,AC);sc(SC.expy,'전용(평)',FB9,FSH,AC);sc(SC.suppy,'공급(평)',FB9,FSH,AC);
+  sc(SC.type,'타입',FB9,FSH,AC);sc(SC.expy,'전용(평)',FB9,FSH,AC);sc(SC.suppy,isOfficetel?'계약(평)':'공급(평)',FB9,FSH,AC);
   sc(SC.price,'평균',FB9,FSH,AC);sc(SC.pypy,'평당가',FB9,FSH,AC);
   ws.mergeCells(r3,SC.type,r3,SC.suppy);ws.mergeCells(r3,SC.units,r4,SC.units);ws.mergeCells(r3,SC.price,r3,SC.pypy);
   r++;
@@ -3441,10 +3475,16 @@ function buildSummaryBlock(ws,unit,titleRow,subs,tr){
   function writeTypeRow(s){
     sc(SC.type,s.t.code,FN9,null,AC);
     sc(SC.expy,`=A${s.ds}*0.3025`,FN9,null,AC,NFPY);
-    sc(SC.suppy,`=C${s.ds}`,FN9,null,AC,NFPY);
+    // 메인 표 C열은 평당가 산정 기준(오피스텔=전용, 아파트=공급)이라 종류에 따라 서로
+    // 다른 값을 담는다. 이 칸은 그와 별개로 항상 "B열(계약/공급면적) 자체의 평수"를 그대로
+    // 보여줘야 하므로(실사례로 확인된 라벨-값 불일치 - 오피스텔에서 C열을 그대로 참조하면
+    // 전용(평)과 값이 똑같아져 버렸었다), B열에서 직접 환산한다.
+    sc(SC.suppy,`=B${s.ds}*0.3025`,FN9,null,AC,NFPY);
     sc(SC.units,`=H${s.sr}`,FN9,null,AC,NF0);
     sc(SC.price,`=I${s.sr}/10000`,FN9,null,AC,NF0);
-    sc(SC.pypy,`=${colLetter(SC.price)}${r}/${colLetter(SC.suppy)}${r}`,FN9,null,AC,NF0);
+    // 평당가는 위 표시용 값(AH)이 아니라 메인 표 자체의 평당가 산정 기준 열(C)로 나눠야
+    // 종류별 기준(오피스텔=전용, 아파트=공급)이 항상 메인 표와 일치한다.
+    sc(SC.pypy,`=${colLetter(SC.price)}${r}/C${s.ds}`,FN9,null,AC,NF0);
   }
 
   const closingRows=[];
@@ -3488,7 +3528,9 @@ function buildSummaryBlock(ws,unit,titleRow,subs,tr){
     sc(SC[key],`=(${terms})/${uDenomAvg}`,FB9,FSA,AC,nf);
   });
   sc(SC.units,`=${closingRows.map(cr=>`${colLetter(SC.units)}${cr}`).join('+')}`,FB9,FSA,AC,NF0);
-  sc(SC.pypy,`=${colLetter(SC.price)}${avgRow}/${colLetter(SC.suppy)}${avgRow}`,FB9,FSA,AC,NF0);
+  // 전체 평균 평당가도 종류별 산정 기준(오피스텔=전용, 아파트=계약/공급)에 맞는 평균 열로
+  // 나눈다 - AH(계약/공급 평균)를 오피스텔에 그대로 쓰면 기준이 어긋난다.
+  sc(SC.pypy,`=${colLetter(SC.price)}${avgRow}/${colLetter(isOfficetel?SC.expy:SC.suppy)}${avgRow}`,FB9,FSA,AC,NF0);
 }
 function buildBlock(ws,unit,startRow){
   let r=startRow;

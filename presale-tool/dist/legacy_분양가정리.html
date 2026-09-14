@@ -162,7 +162,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
  * 분양가 정리 도구 - 파서 모듈 (Agent A)
  *
  * Contract:
- *   parseAreaSection(text)                      -> [{code, exclusive_area, supply_area, supply_units}]
+ *   parseAreaSection(text, isOfficetel?)         -> [{code, exclusive_area, supply_area, supply_units}]
  *   parsePriceSection(text, codes, baseDate?)    -> {midDates, priceRows, unit_mult}
  *   parseBalconySection(text, codes)             -> {code: amount}
  *   parseOptionSection(text, codes)              -> {code: amount}
@@ -469,7 +469,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         for (var k = 0; k < floats.length; k++) {
           if (k === i || k === j) continue;
           if (Math.abs(floats[k].v - sum) <= 0.02 && (!best || floats[k].v < best.c)) {
-            best = { a: floats[i].v, b: floats[j].v, c: floats[k].v };
+            best = { a: floats[i].v, b: floats[j].v, c: floats[k].v, ai: i, bi: j, ci: k };
           }
         }
       }
@@ -477,11 +477,34 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     return best;
   }
 
+  // 오피스텔 문서 중에는 "전용+공용=소계(공급면적)"에서 한 단계 더 나아가
+  // "소계+기타공용면적(주차장면적 포함)=계약면적"까지 누적되는 표가 있다(실사례: 힐스테이트
+  // 송파더그리드 오피스텔 - 공급호실 34.9930 15.2004 50.1934 30.2670 80.4604 10.4468 순서로
+  // 전용/공용/소계/기타공용/계약면적/대지지분이 이어진다). 이 경우 findAreaTriple이 찾는
+  // 가장 안쪽 합(소계=50.1934)은 오피스텔 문서가 실제로 표기하는 "계약면적"(80.4604)이
+  // 아니다. 표 헤더에 "계약면적"이라는 단어가 실제로 등장할 때만(문서 구조 자체가 증거)
+  // 안쪽 triple을 이미 사용한 세 값(전용/공용/소계)과는 다른 새 두 값(기타공용/계약면적)으로
+  // 한 단계 더 확장을 시도한다 - 대지지분처럼 우연히 다른 합과 맞아떨어지는 값까지 이미 쓴
+  // 인덱스로 제한해 오탐을 막는다.
+  function findOuterAreaExtension(floats, inner) {
+    var used = {};
+    used[inner.ai] = used[inner.bi] = used[inner.ci] = true;
+    for (var j = 0; j < floats.length; j++) {
+      if (used[j]) continue;
+      var sum = floats[inner.ci].v + floats[j].v;
+      for (var k = 0; k < floats.length; k++) {
+        if (k === inner.ci || used[k] || k === j) continue;
+        if (Math.abs(floats[k].v - sum) <= 0.02) return floats[k].v;
+      }
+    }
+    return null;
+  }
+
   // 한 주택형 분량의 토큰 조각에서 {code, exclusive_area, supply_area, supply_units}를 추출.
   // 세그먼트 경계가 느슨해 앞/뒤 다른 주택형의 꼬리 토큰이 약간 섞여 들어와도,
   // "면적값 이후 첫 정수 우선, 없으면 면적값 이전 마지막 정수"와 "코드 숫자 접두부에 가장
   // 가까운 면적값" 규칙 덕분에 실제 값이 안정적으로 골라진다.
-  function extractAreaFromTokens(toks) {
+  function extractAreaFromTokens(toks, preferContractArea) {
     var floats = [];
     var ints = [];
     for (var k = 0; k < toks.length; k++) {
@@ -544,6 +567,10 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     if (triple) {
       exclusive_area = Math.max(triple.a, triple.b);
       supply_area = triple.c;
+      if (preferContractArea) {
+        var outer = findOuterAreaExtension(floats, triple);
+        if (outer != null) supply_area = outer;
+      }
     } else {
       var codeNum = parseFloat((code.match(/\d+/) || [])[0]);
       var byAsc = floats.slice().sort(function (a, b) { return a.v - b.v; });
@@ -589,9 +616,15 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     return out;
   }
 
-  function parseAreaSection(text) {
+  function parseAreaSection(text, isOfficetel) {
     text = fixGluedNumbers(String(text || '').replace(/㎡/g, ' '));
     text = fixGluedSubCodesFromFootnote(text);
+    // "전용+공용=소계(공급면적), 소계+기타공용면적=계약면적"처럼 두 단계로 누적되는 표는
+    // 아파트/오피스텔 모두에 나온다(실사례: 의왕역 SK VIEW 아파트도 이 구조를 그대로 씀) -
+    // "계약면적"이라는 단어의 등장 여부만으로는 어느 단계를 원하는지 구분할 수 없다. 오피스텔은
+    // 관행상 계약면적(바깥쪽, 기타공용면적까지 포함)을, 아파트는 공급면적(안쪽, 소계)을 쓰므로
+    // isOfficetel(사용자가 폼에서 고른 단지 종류)로만 판단한다.
+    var preferContractArea = !!isOfficetel && /계약면적/.test(text);
     var tokens = text.split(/\s+/).filter(Boolean);
     tokens = reglueSplitShortCodes(tokens);
 
@@ -648,7 +681,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         if (/공급면적|공급규모|전용면적|관리번호|주택형|호형/.test(line) && !/\d\.\d/.test(line)) return;
         var lineToks = tokenize(line);
         if (lineToks.length < 3) return;
-        var parsed2 = extractAreaFromTokens(lineToks);
+        var parsed2 = extractAreaFromTokens(lineToks, preferContractArea);
         if (parsed2) out2.push(parsed2);
       });
       return out2;
@@ -715,11 +748,11 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         }
       }
       if (segEnd <= segStart) continue;
-      var parsed = extractAreaFromTokens(tokens.slice(segStart, segEnd));
+      var parsed = extractAreaFromTokens(tokens.slice(segStart, segEnd), preferContractArea);
       // 2차 시도(면적먼저형처럼 코드 앞에 전용면적이 오는 경우만): 코드 앞 2칸까지 넓혀 재시도.
       if (!parsed) {
         var segStart2 = Math.max(0, segStart - 2);
-        parsed = extractAreaFromTokens(tokens.slice(segStart2, segEnd));
+        parsed = extractAreaFromTokens(tokens.slice(segStart2, segEnd), preferContractArea);
       }
       if (parsed) out.push(parsed);
     }
