@@ -510,6 +510,33 @@ function dateSerial(dt) {
     return out;
   }
 
+  // 위와 같은 이유이지만 관리코드 자체가 소수가 아니라 순수 정수인 문서도 있다(실사례:
+  // 힐스테이트 송파더그리드 오피스텔 - "60 28 60.3737 25.0137 ..."처럼 약식표기가 그냥
+  // "60"이고, 그 세대수(28) 바로 뒤에 전용면적(60.3737)이 이어짐). 레터 접미사형(34A/34B
+  // 등)과 이런 순수 숫자형(36/48/52/60 등)이 한 표 안에 섞여 있으면, 순수 숫자형은
+  // SHORT_CODE_RE(문자 접미사 필수)/LONG_CODE_RE(소수 필수)/BARE_LONG_CODE_RE(소수 필수)
+  // 어디에도 안 걸려 boundaries 자체가 하나도 안 잡히고, 그 표 구간이 통째로 직전 레터
+  // 접미사 코드의 꼬리로 잘못 흡수된다(가격 섹션에서도 같은 코드로 잘못 흡수돼 세대수가
+  // 부풀려짐). "숫자 하나(2~3자리) 뒤 몇 토큰 안에 그 숫자와 정수부가 똑같은 소수(전용
+  // 면적)가 있는지"로 자기참조 검증하는 방식은 findSelfConsistentBareCodeBoundaries와
+  // 동일하되, 후보 토큰 자체가 소수가 아니라 순수 정수라는 점만 다르다.
+  // 순수 정수(2~3자리)는 세대수·기타 수치로도 흔해 findSelfConsistentBareCodeBoundaries의
+  // 느슨한(뒤 5토큰 이내 아무 곳) 검증 방식을 그대로 쓰면 우연한 오탐 위험이 크다(실측:
+  // 세대수 "13"이 다른 행의 "13.x" 대지지분 값과 우연히 부합해 코드로 오인됨). 그래서
+  // "코드 바로 뒤(정확히 2칸 뒤)에 그 코드와 정수부가 같은 전용면적이 오고, 그 사이(1칸
+  // 뒤)에는 세대수 모양의 정수가 온다"는 실제 행 구조(코드·세대수·전용면적 순서)와 정확히
+  // 일치할 때만 인정해 오탐 가능성을 크게 줄인다.
+  function findSelfConsistentBareIntCodeBoundaries(tokens) {
+    var out = [];
+    for (var i = 0; i < tokens.length; i++) {
+      if (!/^\d{2,3}$/.test(tokens[i])) continue;
+      if (!/^\d{1,4}$/.test(tokens[i + 1] || '')) continue;
+      var m = /^(\d{2,3})\.\d+$/.exec(tokens[i + 2] || '');
+      if (m && Number(m[1]) === Number(tokens[i])) out.push(i);
+    }
+    return out;
+  }
+
   // 일부 문서는 표 셀 안에서 약식표기가 "130\nA1"처럼 숫자 접두부와 문자 접미부가 서로 다른
   // 줄로 나뉘어 있어(칸이 좁아 줄바꿈), PDF 추출 시 둘 사이에 공백이 남아 별개 토큰("130",
   // "A1")으로 쪼개진다(실사례: 광주 한 아파트 분양공고 - "130A1"/"130A2"가 이렇게 쪼개져
@@ -745,6 +772,15 @@ function dateSerial(dt) {
         if (LONG_CODE_RE.test(toks[t2])) { code = toks[t2]; break; }
       }
     }
+    // 코드가 순수 정수형(예: "36 13 36.9234...")이고 세그먼트 맨 앞이 코드 자신인 경우 -
+    // 세그먼트 경계 자체가 findSelfConsistentBareIntCodeBoundaries로 이미 "정수부가 같은
+    // 소수(전용면적)가 근처에 있다"는 자기참조 검증을 거쳐 확정된 것이므로, 여기서도 같은
+    // 기준으로 첫 토큰을 코드로 채택한다. 이 확인을 안 하면 바로 아래 "float 바로 앞/뒤
+    // 정수" 폴백이 코드(36)가 아니라 세대수(13, float 바로 앞 토큰)를 코드로 잘못 집는다
+    // (세대수가 코드보다 float에 더 가까이 붙어 있는 "코드-세대수-면적" 순서 문서에서 실측).
+    if (!code && /^\d{2,3}$/.test(toks[0]) && floats.some(function (f) { return Math.floor(f.v) === Number(toks[0]); })) {
+      code = toks[0];
+    }
     if (!code) {
       var adj = [toks[firstFloatIdx - 1], toks[firstFloatIdx + 1]].filter(Boolean);
       for (var ai = 0; ai < adj.length; ai++) {
@@ -831,32 +867,40 @@ function dateSerial(dt) {
       for (var i2 = 0; i2 < tokens.length; i2++) if (LONG_CODE_RE.test(tokens[i2])) boundaries.push(i2);
     }
 
+    // 레터 접미사형(59A 등)과 무접미사 관리코드형(036.9653 등)이 한 표 안에 섞여 있는 문서 대응:
+    // 자기참조 검증을 통과한 무접미사 경계도 추가로 합친다(둘 다 없거나 둘 다 있어도 안전).
+    // 아래 중복 경계 판별(withFloatNext)이 이 경계들도 함께 걸러낼 수 있도록, 그 판별보다
+    // 먼저 합쳐둔다.
+    var bareBoundaries = findSelfConsistentBareCodeBoundaries(tokens)
+      .concat(findSelfConsistentBareIntCodeBoundaries(tokens));
+    if (bareBoundaries.length) {
+      bareBoundaries.forEach(function (idx) { if (boundaries.indexOf(idx) === -1) boundaries.push(idx); });
+      boundaries.sort(function (a, b) { return a - b; });
+    }
+
     // 같은 코드가 경계 후보로 두 번 이상 잡히는 문서가 있다(실사례: 부산에코델타시티 디에트르
     // 더 퍼스트 - 실제 데이터 표 뒤에 "■ 주택형 표시 안내"라는 코드만 다시 나열하는 매핑 표가
-    // 있어 "84A 84B 84C ..."가 한 번 더 경계로 잡힌다). 매핑 표의 코드 나열은 뒤에 다시 코드(가
-    // 아니면 아무 소수 면적값도 없이) 이어지지만, 실제 데이터 행은 항상 코드 바로 뒤에 소수
-    // 면적값이 온다는 구조적 차이로 실제 데이터 행만 남긴다(해당 코드에 그런 occurrence가 하나도
-    // 없으면 판단 근거가 없으므로 원래대로 전부 남겨 안전하게 후퇴한다).
+    // 있어 "84A 84B 84C ..."가 한 번 더 경계로 잡힌다. 힐스테이트 송파더그리드 오피스텔은
+    // "■ 거주자 우선분양" 표가 같은 코드를 세대수 없이 다른 숫자(우선공급 배정 등)와 함께 또
+    // 나열한다). 매핑/부가 표의 코드 나열은 뒤에 다시 코드(나 무관한 숫자)가 이어지지만, 실제
+    // 데이터 행은 코드 바로 뒤(또는 세대수 하나를 사이에 두고)에 소수 면적값이 온다는 구조적
+    // 차이로 실제 데이터 행만 남긴다(해당 코드에 그런 occurrence가 하나도 없으면 판단 근거가
+    // 없으므로 원래대로 전부 남겨 안전하게 후퇴한다).
     var boundariesByCode = {};
     boundaries.forEach(function (idx) { var c = tokens[idx]; (boundariesByCode[c] = boundariesByCode[c] || []).push(idx); });
     Object.keys(boundariesByCode).forEach(function (c) {
       var occ = boundariesByCode[c];
       if (occ.length < 2) return;
-      var withFloatNext = occ.filter(function (idx) { return /^\d+\.\d+$/.test(tokens[idx + 1] || ''); });
+      var withFloatNext = occ.filter(function (idx) {
+        if (/^\d+\.\d+$/.test(tokens[idx + 1] || '')) return true;
+        return /^\d{1,4}$/.test(tokens[idx + 1] || '') && /^\d+\.\d+$/.test(tokens[idx + 2] || '');
+      });
       if (withFloatNext.length && withFloatNext.length < occ.length) {
         var keep = {};
         withFloatNext.forEach(function (idx) { keep[idx] = true; });
         boundaries = boundaries.filter(function (idx) { return tokens[idx] !== c || keep[idx]; });
       }
     });
-
-    // 레터 접미사형(59A 등)과 무접미사 관리코드형(036.9653 등)이 한 표 안에 섞여 있는 문서 대응:
-    // 자기참조 검증을 통과한 무접미사 경계도 추가로 합친다(둘 다 없거나 둘 다 있어도 안전).
-    var bareBoundaries = findSelfConsistentBareCodeBoundaries(tokens);
-    if (bareBoundaries.length) {
-      bareBoundaries.forEach(function (idx) { if (boundaries.indexOf(idx) === -1) boundaries.push(idx); });
-      boundaries.sort(function (a, b) { return a - b; });
-    }
     if (!boundaries.length) {
       // 짧은형/긴형 코드가 전혀 없는 경우(순수 숫자 코드형): 줄 단위로 폴백해
       // extractAreaFromTokens의 "면적값 인접 순수정수" 최후수단 규칙에 맡긴다.
@@ -920,8 +964,16 @@ function dateSerial(dt) {
       // 각주 뒤쪽(다음 타입의 관리번호 등 무관한 숫자)까지 밀려 엉뚱한 값을 세대수로
       // 잘못 채택한다. "•"로 시작하는 각주 프로즈는 데이터 행에 나올 수 없는 형태이므로,
       // 세그먼트를 그 지점 이전까지로 잘라 각주가 아예 안 섞이게 한다.
+      // 페이지 하단 쪽번호("- 4 -")가 타입의 마지막 데이터 행 바로 뒤, 각주보다도 먼저
+      // 붙는 문서도 있다(실사례: 힐스테이트 송파더그리드 오피스텔 - "...17.7875 - 4 -
+      // • 상기...". 쪽번호의 "4"가 면적값 뒤 첫 정수로 잘못 채택되어 세대수(12)를 밀어내고
+      // 엉뚱하게 그 값(4)이 세대수가 됨). "-"+숫자+"-"라는 쪽번호 특유의 형태는 실제 데이터
+      // 행에 나올 수 없으므로, 이 패턴도 각주와 같은 방식으로 그 지점 이전까지 자른다.
       for (var bulletIdx = segStart; bulletIdx < segEnd; bulletIdx++) {
         if (tokens[bulletIdx] === '•') { segEnd = bulletIdx; break; }
+        if (tokens[bulletIdx] === '-' && /^\d{1,3}$/.test(tokens[bulletIdx + 1] || '') && tokens[bulletIdx + 2] === '-') {
+          segEnd = bulletIdx; break;
+        }
       }
       if (segEnd <= segStart) continue;
       var parsed = extractAreaFromTokens(tokens.slice(segStart, segEnd));
@@ -1368,7 +1420,15 @@ function dateSerial(dt) {
       var resolvedCode = null;
       var resolvedIsAlias = false;
       var resolvedFamilyRest = null;
-      if (codeSet) {
+      // 순수 숫자 코드(예: "104")가 세대수로도 문서 안 다른 곳에서 우연히 등장할 수 있다
+      // (실사례: 힐스테이트 송파더그리드 오피스텔 - "42B1 104 최저가..."에서 42B1의
+      // 세대수 104가 마침 다른 타입의 실제 코드이기도 함). 이 "104"를 코드로 잘못 해석하면
+      // 그 뒤 최저가/최고가 값이 엉뚱하게 "104" 타입으로 흡수되고 42B1은 데이터를 통째로
+      // 잃는다. "아직 데이터가 없는 현재 코드 바로 뒤에 숫자 하나 + '최저가'가 이어지는"
+      // 형태는 그 숫자가 새 코드가 아니라 현재 코드 자신의 세대수임이 구조적으로 명백하므로,
+      // 이 경우엔 codeSet 매칭보다 우선해 새 코드로 취급하지 않는다.
+      var looksLikeOwnUnitCount = /^\d+$/.test(tok) && currentCodes.length && !groupHasRows && tokens[i + 1] === '최저가';
+      if (codeSet && !looksLikeOwnUnitCount) {
         if (codeSet.indexOf(tok) !== -1) resolvedCode = tok;
         else {
           var aliasCandidate = longCodeToShortCandidate(tok);
@@ -2413,43 +2473,68 @@ function dateSerial(dt) {
       var priceRepaired2 = repairUndercountedPriceRows(text, price, priceEndIdx, areaTypesForRepair, priceRepairBound);
       if (priceRepaired2) { price = priceRepaired2; }
 
-      // 두 번째(별도) "■ 공급금액 표"가 문서 뒤쪽에, balcony/option 앵커보다도 늦게 또
-      // 있는 경우가 있다(실사례: 전남광주통합특별시 북구 임동 아파트 - "최상층 특화(펜트)
-      // 세대"만 따로 다루는 두 번째 표가 "■ 공통 유의사항" 섹션 안에 흩어져 있다). 이
-      // 두 번째 표는 다른 타입(200B/207F/209C/211E)의 가격을 메인 표와 중복해서 다시
-      // 보여주기도 해서, 통째로 이어붙이면 그 타입들의 세대수가 두 배로 잘못 집계된다.
-      // 그래서 표 전체를 붙이는 대신, 기존 복구를 다 거치고도 여전히 가격 행이 하나도
-      // 없는 코드만 targeted로 찾는다. 이런 코드(214A/214D)는 긴 관리코드가 줄바꿈
-      // 지점에서 쪼개진 채("214.618\n3A ...") 남아 있어, 줄 시작에 층 표기가 와야 하는
-      // repairUndercountedPriceRows의 재개 지점 판별로도 못 찾는다(그 줄이 "3A 107동
-      // 1호 1 49층 1 ..."처럼 코드 조각으로 시작). area 섹션에서 이미 정확히 읽어낸 그
-      // 코드의 전용면적(exclusive_area)으로 온전한 긴 코드 문자열을 직접 재구성해
-      // (예: "214A" + 전용면적 214.6183 -> "214.6183A"), 두 번째 표 구간을 재결합한
-      // 토큰에서 그 문자열을 정확히 찾아 그 지점부터 일정 구간만 잘라 붙인다(그 코드가
-      // 실제로 다시 등장하지 않으면 아무 것도 붙이지 않으므로 다른 문서에는 영향이 없다).
+      // 두 번째(별도) 가격표가 문서 뒤쪽에, balcony/option 앵커보다도 늦게 또 있는 경우가
+      // 있다(실사례: 전남광주통합특별시 북구 임동 아파트 - "최상층 특화(펜트) 세대"만
+      // 따로 다루는 두 번째 표가 "■ 공통 유의사항" 섹션 안에 흩어져 있다. 힐스테이트
+      // 송파더그리드 오피스텔은 아예 "■" 헤딩 없이 긴 유의사항 프로즈 뒤에 표 헤더만
+      // 다시 찍고 곧장 이어짐). 이 두 번째 표는 다른 타입(200B/207F/209C/211E 등)의
+      // 가격을 메인 표와 중복해서 다시 보여주기도 해서, 통째로 이어붙이면 그 타입들의
+      // 세대수가 두 배로 잘못 집계된다. 그래서 표 전체를 붙이는 대신, 기존 복구를 다
+      // 거치고도 여전히 가격 행이 하나도 없는 코드만 targeted로 찾는다.
+      //   - 긴 소수형 코드는 줄바꿈 지점에서 쪼개진 채("214.618\n3A ...") 남아 있어, 줄
+      //     시작에 층 표기가 와야 하는 repairUndercountedPriceRows의 재개 지점 판별로도
+      //     못 찾는다(그 줄이 "3A 107동 1호 1 49층 1 ..."처럼 코드 조각으로 시작) - area
+      //     섹션에서 이미 읽어낸 전용면적으로 온전한 긴 코드 문자열을 재구성해(예: "214A"
+      //     + 214.6183 -> "214.6183A") 찾는다.
+      //   - 층 표기 자체가 아예 없는 "코드+최저가/최고가" 형식(순수 숫자 코드 등)은 긴
+      //     코드 재구성이 필요 없이 코드 자신이 그대로 다시 등장하므로, 코드 문자열
+      //     그대로 찾는다.
+      // 두 경우 다, 그 코드가 실제로 다시 등장하지 않으면 아무 것도 붙이지 않으므로 다른
+      // 문서에는 영향이 없다. 탐색 시작점도 "■" 헤딩이 있으면 그 지점, 없으면 기존 가격
+      // 섹션이 끝난 지점(priceEndIdx)부터 최대한 넓게(발코니/옵션 경계 또는 문서 끝까지)
+      // 잡는다 - 헤딩 유무와 무관하게 targeted 검색이므로 범위를 넓혀도 안전하다.
       var beforeExtra = parsePriceSection(price, areaCodes).priceRows;
       var seenBeforeExtra = {};
       beforeExtra.forEach(function (r) { seenBeforeExtra[r.code] = true; });
       var stillMissingCodes = areaCodes.filter(function (c) { return !seenBeforeExtra[c]; });
-      var extraPriceStart = (stillMissingCodes.length && priceEndIdx >= 0) ? findEarliestMatch(text, SECTION_ANCHORS.price, priceEndIdx) : -1;
+      var extraPriceStart = -1;
+      if (stillMissingCodes.length && priceEndIdx >= 0) {
+        var extraHeadingStart = findEarliestMatch(text, SECTION_ANCHORS.price, priceEndIdx);
+        extraPriceStart = extraHeadingStart >= 0 ? extraHeadingStart : priceEndIdx;
+      }
       if (extraPriceStart >= 0) {
-        var widerPriceBound = nextMajorStart >= 0 && nextMajorStart > extraPriceStart ? nextMajorStart : text.length;
+        var widerPriceBound = firstPositive(balconyStart > extraPriceStart ? balconyStart : -1,
+          optionStart > extraPriceStart ? optionStart : -1, nextMajorStart > extraPriceStart ? nextMajorStart : -1);
+        if (widerPriceBound < 0) widerPriceBound = text.length;
         var extraTokens = reglueSplitLongCodes(text.slice(extraPriceStart, widerPriceBound).split(/\s+/).filter(Boolean));
         var areaByCode = {};
         areaTypesForRepair.forEach(function (a) { areaByCode[a.code] = a; });
         var snippets = [];
         stillMissingCodes.forEach(function (code) {
           var a = areaByCode[code];
-          if (!a || !isFinite(a.exclusive_area)) return;
+          if (!a) return;
           var letterSuffix = (code.match(/[A-Za-z]+\d*$/) || [''])[0];
-          if (!letterSuffix) return;
-          var expectedLong = a.exclusive_area.toFixed(4) + letterSuffix;
-          // "■ 주택형 표시 안내" 같은 코드 매핑 표에도 같은 긴 코드가(줄바꿈 없이 온전한
-          // 형태로) 먼저 나올 수 있어, 첫 번째 occurrence가 아니라 마지막 occurrence를
-          // 쓴다 - 실제 가격 행은 항상 이 문서에서 더 뒤쪽에(줄바꿈으로 쪼개진 채) 있다.
-          var idx = extraTokens.lastIndexOf(expectedLong);
+          // "■ 주택형 표시 안내" 같은 코드 매핑 표에도 같은 코드가 먼저 나올 수 있어,
+          // 첫 번째 occurrence가 아니라 마지막 occurrence를 쓴다 - 실제 가격 행은 항상
+          // 이 문서에서 더 뒤쪽에 있다.
+          var idx = -1;
+          if (letterSuffix && isFinite(a.exclusive_area)) {
+            idx = extraTokens.lastIndexOf(a.exclusive_area.toFixed(4) + letterSuffix);
+          }
+          if (idx === -1) idx = extraTokens.lastIndexOf(code);
           if (idx === -1) return;
-          snippets.push(extraTokens.slice(idx, Math.min(extraTokens.length, idx + 20)).join(' '));
+          // 코드+세대수 뒤에 "최저가"/"최고가" 두 행(각 라벨+금액 12개 = 13토큰)이 이어지는
+          // 형식은 한 쌍을 통째로 담으려면 2+13+13=28토큰이 필요하다 - 너무 좁게 자르면
+          // 최고가 쪽 금액이 중간에 잘려 파싱 자체가 실패한다(실측). 넉넉히 36토큰까지 담되,
+          // 그 사이에 다른 area 코드가 먼저 등장하면(자기 행이 그보다 짧다는 뜻) 거기서
+          // 끊는다 - 안 그러면 뒤이은 코드의 행 일부가 이 스니펫에 얹혀 따라와, 나중에 그
+          // 코드 자신의 스니펫과 합쳐질 때 같은 행이 두 번 잡혀 세대수가 부풀려진다(실측:
+          // 118의 최고가 행이 115 스니펫에 얹혀와 118 스니펫과 중복).
+          var windowEnd = Math.min(extraTokens.length, idx + 36);
+          for (var wi = idx + 2; wi < windowEnd; wi++) {
+            if (areaCodes.indexOf(extraTokens[wi]) !== -1) { windowEnd = wi; break; }
+          }
+          snippets.push(extraTokens.slice(idx, windowEnd).join(' '));
         });
         if (snippets.length) {
           var mergedWithExtra = (price + '\n' + snippets.join('\n')).trim();
