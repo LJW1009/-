@@ -1677,7 +1677,7 @@ function buildSummaryBlock(ws,unit,titleRow,subs,tr){
   const NFPY='0.0"평"',NF0='#,##0';
   const r1=r;
   sc(SC.type,`=A${titleRow}`,FN9,null,{horizontal:'left',vertical:'middle'});
-  sc(SC.price,'*공급평형기준',FN9,null,AR);
+  sc(SC.price,isOfficetel?'* 계약평형기준':'*공급평형기준',FN9,null,AR);
   ws.mergeCells(r1,SC.type,r1,SC.suppy);ws.mergeCells(r1,SC.price,r1,SC.pypy);
   r++;
   const r2=r;
@@ -1715,9 +1715,12 @@ function buildSummaryBlock(ws,unit,titleRow,subs,tr){
     sc(SC.suppy,`=B${s.ds}*0.3025`,FN9,null,AC,NFPY);
     sc(SC.units,`=H${s.sr}`,FN9,null,AC,NF0);
     sc(SC.price,`=I${s.sr}/10000`,FN9,null,AC,NF0);
-    // 평당가는 위 표시용 값(AH)이 아니라 메인 표 자체의 평당가 산정 기준 열(C)로 나눠야
-    // 종류별 기준(오피스텔=전용, 아파트=공급)이 항상 메인 표와 일치한다.
-    sc(SC.pypy,`=${colLetter(SC.price)}${r}/C${s.ds}`,FN9,null,AC,NF0);
+    // 평당가 분모는 종류별 산정 기준(오피스텔=전용, 아파트=계약/공급)에 맞는 이
+    // 요약본 자신의 열(AG/AH)을 쓴다 - 오피스텔은 AG(전용), 아파트는 AH(계약/공급)가
+    // 곧 메인 표 C열과 같은 값이므로(각 kind에서 서로 같은 기준을 가리킴) 결과는
+    // 동일하지만, 요약본이 메인 표를 다시 참조하지 않고 자기 열만으로 완결되게 한다
+    // (실사용 서식 예시 확인 - 항상 AG로 나눔).
+    sc(SC.pypy,`=${colLetter(SC.price)}${r}/${colLetter(isOfficetel?SC.expy:SC.suppy)}${r}`,FN9,null,AC,NF0);
   }
 
   const closingRows=[];
