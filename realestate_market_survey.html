@@ -258,8 +258,28 @@ let dragSrcId=null; // 타입별 평형 정보 표의 드래그앤드롭 재정�
 let dragCxId=null; // 단지 목록의 드래그앤드롭 재정렬용
 let editCxId=null;
 
+// 금액 단위를 만원→천원으로 전환하면서, 이미 저장된 기존 데이터(실거래가·호가·KB시세·전세·
+// 월세 보증금/월세)는 실제 금액이 그대로 유지되도록 전부 ×10 해서 한 번만 이관한다.
+// DB.unitMigratedV1 플래그로 재실행을 막는다 — 두 번 실행되면 ×100이 되어버리므로 반드시
+// 1회성이어야 한다. 매물건수(cnt) 등 금액이 아닌 필드는 손대지 않는다.
+function migrateToCheonwon(){
+  if(DB.unitMigratedV1)return;
+  Object.keys(DB.marketData||{}).forEach(function(cid){
+    Object.keys(DB.marketData[cid]||{}).forEach(function(m){
+      const md=DB.marketData[cid][m];
+      (md.trades||[]).forEach(function(t){if(t.price!=null)t.price*=10;});
+      (md.jeonse||[]).forEach(function(t){if(t.price!=null)t.price*=10;});
+      (md.wolse||[]).forEach(function(t){if(t.deposit!=null)t.deposit*=10;if(t.rent!=null)t.rent*=10;});
+      (md.asking||[]).forEach(function(a){if(a.lo!=null)a.lo*=10;if(a.hi!=null)a.hi*=10;});
+      (md.kb||[]).forEach(function(k){if(k.avg!=null)k.avg*=10;});
+    });
+  });
+  DB.unitMigratedV1=true;
+  saveDB();
+}
 function loadDB(){
   try{const s=localStorage.getItem('reDB_v4');if(s)DB=JSON.parse(s);}catch(e){}
+  migrateToCheonwon();
   initSels();renderCxList();renderExpList();
 }
 // HTML date input(YYYY-MM-DD) → YYYYMMDD 형식 변환
@@ -334,8 +354,8 @@ function wtdPyPrice(results,getVal){
   });
   return su>0?Math.round(sp/su):null;
 }
-const N=v=>v!=null&&!isNaN(v)?Math.round(v).toLocaleString()+'만':'<span class="nc">-</span>';
-const P=(v,py)=>{const r=pyOf(v,py);return r!=null?r.toLocaleString()+'만':'<span class="nc">-</span>';};
+const N=v=>v!=null&&!isNaN(v)?Math.round(v).toLocaleString()+'천':'<span class="nc">-</span>';
+const P=(v,py)=>{const r=pyOf(v,py);return r!=null?r.toLocaleString()+'천':'<span class="nc">-</span>';};
 const pct=v=>v!=null?v.toFixed(1)+'%':'<span class="nc">-</span>';
 // 여러 타입(월세 데이터 있는 타입들)의 환산보증금 기준 중 최빈값 채택 — 그룹평균/전체평균 공통 사용
 function modeStdDep(results){
@@ -343,12 +363,12 @@ function modeStdDep(results){
   results.forEach(function(r){const sd=r.yd.wolseResult?.stdDep;if(sd!=null)freq[sd]=(freq[sd]||0)+1;});
   const keys=Object.keys(freq);
   if(!keys.length)return null;
-  // 최빈값이 여러 개로 동률일 때는(예: 1000/2000이 동일 빈도) 그중 3000만원에 가장 가까운 쪽을
-  // 기본값으로 채택한다 — 데이터가 명확히 한쪽으로 쏠려 있으면 그대로 최빈값을 쓰고, 애매할 때만
-  // 3000을 기준으로 삼는다.
+  // 최빈값이 여러 개로 동률일 때는(예: 10000/20000이 동일 빈도) 그중 30000천원(3000만원)에
+  // 가장 가까운 쪽을 기본값으로 채택한다 — 데이터가 명확히 한쪽으로 쏠려 있으면 그대로 최빈값을
+  // 쓰고, 애매할 때만 30000을 기준으로 삼는다.
   return parseInt(keys.sort(function(a,b){
     if(freq[b]!==freq[a])return freq[b]-freq[a];
-    return Math.abs(a-3000)-Math.abs(b-3000);
+    return Math.abs(a-30000)-Math.abs(b-30000);
   })[0]);
 }
 
@@ -425,9 +445,10 @@ function calcGroupAvg(types, oft){
 
 // 전세·월세·수익률 계산
 // ═══════════════════════════════════════════════════════════
-// 보증금 환산 기준: 500,1000,2000,3000 중 단지평균보증금에 가장 가까운 값
+// 보증금 환산 기준: 500만/1000만/2000만/3000만원(=5000/10000/20000/30000천원) 중
+// 단지평균보증금에 가장 가까운 값
 function getStdDep(avgDep){
-  const S=[500,1000,2000,3000];
+  const S=[5000,10000,20000,30000];
   return S.reduce((a,b)=>Math.abs(b-avgDep)<Math.abs(a-avgDep)?b:a);
 }
 // 월세 환산: 주택임대차보호법 제7조의2 전월세전환율 적용
@@ -442,7 +463,7 @@ function convWolse(deposit,rent,stdDep){
   const convRent=rent+addRent;
   return{stdDep,convRent,addRent,depDiff};
 }
-// 수익률 계산 (만원 단위)
+// 수익률 계산 (천원 단위)
 // salePrice: 매매가평균(실거래→없으면 호가평균), convRent: 환산월세, stdDep: 환산보증금
 function calcYield(salePrice,convRent,stdDep){
   if(!salePrice||salePrice<=0||!convRent||convRent<=0)return null;
@@ -859,7 +880,8 @@ function handleKbSiseUpload(e,cid){
         // 전용+공급(계약) 오차 합이 0.03㎡ 이내일 때만 인정 (실수 반올림 오차만 허용)
         if(best&&bestD<=0.03){
           const el=document.getElementById('kb-'+encodeURIComponent(t.typeName));
-          if(el){el.value=Math.round(best.tradeAvg);filled++;}
+          // KB부동산 파일의 금액은 만원 단위이므로 프로그램 내부 단위(천원)에 맞춰 ×10
+          if(el){el.value=Math.round(best.tradeAvg*10);filled++;}
         } else {
           unmatched.push(t.typeName||'(이름없음)');
         }
@@ -939,10 +961,10 @@ function loadInputForm(){
     '<button class="stab" onclick="stab(this,\'it-tr-c\')">CSV 업로드</button>'+
     '</div>'+
     '<div id="it-tr-m">'+
-    '<div id="lu-trades" style="font-size:12px;color:var(--t2);margin-bottom:8px">건별 입력 후 [추가] · 단위: 만원'+luBadge('trades')+'</div>'+
+    '<div id="lu-trades" style="font-size:12px;color:var(--t2);margin-bottom:8px">건별 입력 후 [추가] · 단위: 천원'+luBadge('trades')+'</div>'+
     '<div class="row" style="align-items:flex-end">'+
     '<div class="f" style="max-width:260px"><label>타입 선택 (㎡ 기준)</label><select id="tr-sel">'+typeOpts+'</select></div>'+
-    '<div class="f" style="max-width:120px"><label>거래가 (만원)</label><input id="tr-price" type="number" placeholder="33300"></div>'+
+    '<div class="f" style="max-width:120px"><label>거래가 (천원)</label><input id="tr-price" type="number" placeholder="333000"></div>'+
     '<div class="f" style="max-width:85px"><label>층</label><input id="tr-floor" type="number" placeholder="10"></div>'+
     '<div class="f" style="max-width:130px"><label>계약일</label><input id="tr-date" type="date"></div>'+
     '<button class="btn btn-p" onclick="addTrade(\''+cid+'\',\''+month+'\')"><i class="ti ti-plus"></i>추가</button>'+
@@ -956,13 +978,13 @@ function loadInputForm(){
 
     // ── 호가 ──
     '<div id="it-ask">'+
-    '<div id="lu-asking" style="font-size:12px;color:var(--t2);margin-bottom:10px">네이버 부동산 기준 · 만원 · 없으면 비워두세요'+luBadge('asking')+'<br><b style="color:var(--ad)">※ 결과 조회 시 가장 최신 입력월 기준으로 표시</b></div>'+
+    '<div id="lu-asking" style="font-size:12px;color:var(--t2);margin-bottom:10px">네이버 부동산 기준 · 천원 · 없으면 비워두세요'+luBadge('asking')+'<br><b style="color:var(--ad)">※ 결과 조회 시 가장 최신 입력월 기준으로 표시</b></div>'+
     cx.types.map(function(t){
       var ex=md.asking.find(function(a){return a.typeName===t.typeName;})||{};
       return '<div class="row" style="align-items:flex-end">'+
         '<div class="f" style="max-width:240px"><label><b>'+(t.typeName||'(없음)')+'</b> 전용'+t.excl+'㎡'+(oft&&t.contract?' / 계약'+t.contract+'㎡':' / 공급'+t.supply+'㎡')+' '+t.units+'세대</label></div>'+
-        '<div class="f" style="max-width:120px"><label>최저 (만원)</label><input id="al-'+encodeURIComponent(t.typeName)+'" type="number" value="'+(ex.lo||'')+'" placeholder="33000"></div>'+
-        '<div class="f" style="max-width:120px"><label>최고 (만원)</label><input id="ah-'+encodeURIComponent(t.typeName)+'" type="number" value="'+(ex.hi||'')+'" placeholder="34800"></div>'+
+        '<div class="f" style="max-width:120px"><label>최저 (천원)</label><input id="al-'+encodeURIComponent(t.typeName)+'" type="number" value="'+(ex.lo||'')+'" placeholder="330000"></div>'+
+        '<div class="f" style="max-width:120px"><label>최고 (천원)</label><input id="ah-'+encodeURIComponent(t.typeName)+'" type="number" value="'+(ex.hi||'')+'" placeholder="348000"></div>'+
         '</div>';
     }).join('')+
     '<div class="div"></div>'+
@@ -990,7 +1012,7 @@ function loadInputForm(){
 
     // ── KB시세 ──
     '<div id="it-kb" style="display:none">'+
-    '<div id="lu-kb" style="font-size:12px;color:var(--t2);margin-bottom:10px">KB부동산 시세 평균 · 만원 · 없으면 비워두세요'+luBadge('kb')+'<br><b style="color:var(--ad)">※ 결과 조회 시 가장 최신 입력월 기준으로 표시</b></div>'+
+    '<div id="lu-kb" style="font-size:12px;color:var(--t2);margin-bottom:10px">KB부동산 시세 평균 · 천원 · 없으면 비워두세요'+luBadge('kb')+'<br><b style="color:var(--ad)">※ 결과 조회 시 가장 최신 입력월 기준으로 표시</b></div>'+
     '<div style="margin-bottom:10px">'+
     '<button class="btn btn-sm" onclick="document.getElementById(\'kb-sise-file\').click()" title="KB부동산 \'금주시세\' 엑셀을 올리면 전용/공급(계약)면적이 가장 가까운 타입에 매매 일반평균가를 자동으로 채웁니다. 저장 전까지는 그대로 수정 가능합니다."><i class="ti ti-file-upload"></i>KB시세 파일 업로드</button>'+
     '<input type="file" id="kb-sise-file" accept=".xlsx,.xls" style="display:none" onchange="handleKbSiseUpload(event,\''+cid+'\')">'+
@@ -1000,7 +1022,7 @@ function loadInputForm(){
       var ex=md.kb.find(function(k){return k.typeName===t.typeName;})||{};
       return '<div class="row" style="align-items:flex-end">'+
         '<div class="f" style="max-width:240px"><label><b>'+(t.typeName||'(없음)')+'</b> 전용'+t.excl+'㎡'+(oft&&t.contract?' / 계약'+t.contract+'㎡':' / 공급'+t.supply+'㎡')+' '+t.units+'세대</label></div>'+
-        '<div class="f" style="max-width:150px"><label>KB시세 평균 (만원)</label><input id="kb-'+encodeURIComponent(t.typeName)+'" type="number" value="'+(ex.avg||'')+'" placeholder="34000"></div>'+
+        '<div class="f" style="max-width:150px"><label>KB시세 평균 (천원)</label><input id="kb-'+encodeURIComponent(t.typeName)+'" type="number" value="'+(ex.avg||'')+'" placeholder="340000"></div>'+
         '</div>';
     }).join('')+
     '<button class="btn btn-p" onclick="saveKb(\''+cid+'\',\''+month+'\')"><i class="ti ti-device-floppy"></i>KB시세 저장</button></div>'+
@@ -1021,10 +1043,10 @@ function loadInputForm(){
     '<button class="stab" onclick="stab(this,\'it-js-c\')">CSV 업로드</button>'+
     '</div>'+
     '<div id="it-js-m">'+
-    '<div id="lu-jeonse" style="font-size:12px;color:var(--t2);margin-bottom:8px">전세 건별 입력 후 [추가] · 단위: 만원'+luBadge('jeonse')+'</div>'+
+    '<div id="lu-jeonse" style="font-size:12px;color:var(--t2);margin-bottom:8px">전세 건별 입력 후 [추가] · 단위: 천원'+luBadge('jeonse')+'</div>'+
     '<div class="row" style="align-items:flex-end">'+
     '<div class="f" style="max-width:260px"><label>타입 선택 (㎡ 기준)</label><select id="js-sel">'+typeOpts+'</select></div>'+
-    '<div class="f" style="max-width:120px"><label>전세가 (만원)</label><input id="js-price" type="number" placeholder="20000"></div>'+
+    '<div class="f" style="max-width:120px"><label>전세가 (천원)</label><input id="js-price" type="number" placeholder="200000"></div>'+
     '<div class="f" style="max-width:85px"><label>층</label><input id="js-floor" type="number" placeholder="10"></div>'+
     '<div class="f" style="max-width:130px"><label>계약일</label><input id="js-date" type="date"></div>'+
     '<button class="btn btn-p" onclick="addJeonse(\''+cid+'\',\''+month+'\')"><i class="ti ti-plus"></i>추가</button>'+
@@ -1043,11 +1065,11 @@ function loadInputForm(){
     '<button class="stab" onclick="stab(this,\'it-ws-c\')">CSV 업로드</button>'+
     '</div>'+
     '<div id="it-ws-m">'+
-    '<div id="lu-wolse" style="font-size:12px;color:var(--t2);margin-bottom:8px">월세 건별 입력 후 [추가] · 단위: 만원'+luBadge('wolse')+'</div>'+
+    '<div id="lu-wolse" style="font-size:12px;color:var(--t2);margin-bottom:8px">월세 건별 입력 후 [추가] · 단위: 천원'+luBadge('wolse')+'</div>'+
     '<div class="row" style="align-items:flex-end">'+
     '<div class="f" style="max-width:260px"><label>타입 선택 (㎡ 기준)</label><select id="ws-sel">'+typeOpts+'</select></div>'+
-    '<div class="f" style="max-width:120px"><label>보증금 (만원)</label><input id="ws-dep" type="number" placeholder="2000"></div>'+
-    '<div class="f" style="max-width:100px"><label>월세 (만원)</label><input id="ws-rent" type="number" placeholder="80"></div>'+
+    '<div class="f" style="max-width:120px"><label>보증금 (천원)</label><input id="ws-dep" type="number" placeholder="20000"></div>'+
+    '<div class="f" style="max-width:100px"><label>월세 (천원)</label><input id="ws-rent" type="number" placeholder="800"></div>'+
     '<div class="f" style="max-width:85px"><label>층</label><input id="ws-floor" type="number" placeholder="10"></div>'+
     '<div class="f" style="max-width:130px"><label>계약일</label><input id="ws-date" type="date"></div>'+
     '<button class="btn btn-p" onclick="addWolse(\''+cid+'\',\''+month+'\')"><i class="ti ti-plus"></i>추가</button>'+
@@ -1098,7 +1120,7 @@ function addTrade(cid,month){
   saveDB();
   refreshLuBadge(cid,'trades');
   document.getElementById('tr-price').value='';document.getElementById('tr-floor').value='';
-  showMsg('msg-inp','추가 완료 ('+price.toLocaleString()+'만원)','ms');
+  showMsg('msg-inp','추가 완료 ('+price.toLocaleString()+'천원)','ms');
   renderTradeList(cid,month);
 }
 function renderTradeList(cid,month){
@@ -1113,7 +1135,7 @@ function renderTradeList(cid,month){
   const sumHTML=Object.entries(summary).map(function(e){
     var tn=e[0],prices=e[1];
     var avg=Math.round(prices.reduce(function(a,b){return a+b;},0)/prices.length);
-    return '<span style="margin:2px 6px 2px 0;padding:3px 9px;border-radius:var(--r);background:var(--bg3);font-size:11px;display:inline-block"><b>'+(tn||'(없음)')+'</b> '+prices.length+'건 · '+Math.min.apply(null,prices).toLocaleString()+'~'+Math.max.apply(null,prices).toLocaleString()+'만 · 평균 '+avg.toLocaleString()+'만</span>';
+    return '<span style="margin:2px 6px 2px 0;padding:3px 9px;border-radius:var(--r);background:var(--bg3);font-size:11px;display:inline-block"><b>'+(tn||'(없음)')+'</b> '+prices.length+'건 · '+Math.min.apply(null,prices).toLocaleString()+'~'+Math.max.apply(null,prices).toLocaleString()+'천 · 평균 '+avg.toLocaleString()+'천</span>';
   }).join('');
   var rows='';
   trades.forEach(function(t,i){
@@ -1130,7 +1152,7 @@ function renderTradeList(cid,month){
       '<tr id="tr-edit-'+i+'" class="edit-row"><td colspan="7">'+
       '<div class="edit-inner">'+
       '<div class="ef"><label>타입</label><select id="et-type-'+i+'">'+typeOpts+'</select></div>'+
-      '<div class="ef"><label>거래가(만)</label><input id="et-price-'+i+'" type="number" value="'+t.price+'" style="width:100px"></div>'+
+      '<div class="ef"><label>거래가(천)</label><input id="et-price-'+i+'" type="number" value="'+t.price+'" style="width:100px"></div>'+
       '<div class="ef"><label>층</label><input id="et-floor-'+i+'" type="number" value="'+(t.floor||'')+'" style="width:60px"></div>'+
       '<div class="ef"><label>계약일</label><input id="et-date-'+i+'" type="date" value="'+(t.date?t.date.slice(0,4)+'-'+t.date.slice(4,6)+'-'+t.date.slice(6,8):'')+'" style="width:135px"></div>'+
       '<button class="btn btn-p btn-sm" onclick="saveEdit(\''+cid+'\',\''+month+'\','+i+')"><i class="ti ti-check"></i>저장</button>'+
@@ -1138,7 +1160,7 @@ function renderTradeList(cid,month){
       '</div></td></tr>';
   });
   el.innerHTML='<div class="sum-box">'+trades.length+'건 · '+sumHTML+'</div>'+
-    '<div class="tw"><table><thead><tr><th>#</th><th>타입</th><th>거래가(만)</th><th>층</th><th>계약일</th><th>수정</th><th>삭제</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
+    '<div class="tw"><table><thead><tr><th>#</th><th>타입</th><th>거래가(천)</th><th>층</th><th>계약일</th><th>수정</th><th>삭제</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
     '<div style="font-size:11px;color:var(--t3);margin-top:6px">✏️ 수정 버튼 → 타입·가격·층·계약일 변경 후 저장</div>';
   trades.forEach(function(t,i){var s=document.getElementById('et-type-'+i);if(s)s.value=t.typeName;});
 }
@@ -1175,7 +1197,7 @@ function addJeonse(cid,month){
   saveDB();
   refreshLuBadge(cid,'jeonse');
   document.getElementById('js-price').value='';document.getElementById('js-floor').value='';
-  showMsg('msg-inp','전세 추가 완료 ('+price.toLocaleString()+'만원)','ms');
+  showMsg('msg-inp','전세 추가 완료 ('+price.toLocaleString()+'천원)','ms');
   renderJeonseList(cid,month);
 }
 function renderJeonseList(cid,month){
@@ -1189,7 +1211,7 @@ function renderJeonseList(cid,month){
   items.forEach(function(t){if(!summary[t.typeName])summary[t.typeName]=[];summary[t.typeName].push(t.price);});
   const sumHTML=Object.entries(summary).map(function(e){
     var avg=Math.round(e[1].reduce(function(a,b){return a+b;},0)/e[1].length);
-    return '<span style="margin:2px 6px 2px 0;padding:3px 9px;border-radius:var(--r);background:#E0F0FF;font-size:11px;display:inline-block"><b>'+(e[0]||'(없음)')+'</b> '+e[1].length+'건 · 평균 '+avg.toLocaleString()+'만</span>';
+    return '<span style="margin:2px 6px 2px 0;padding:3px 9px;border-radius:var(--r);background:#E0F0FF;font-size:11px;display:inline-block"><b>'+(e[0]||'(없음)')+'</b> '+e[1].length+'건 · 평균 '+avg.toLocaleString()+'천</span>';
   }).join('');
   var rows='';
   items.forEach(function(t,i){
@@ -1206,7 +1228,7 @@ function renderJeonseList(cid,month){
       '<tr id="js-edit-'+i+'" class="edit-row"><td colspan="7">'+
       '<div class="edit-inner">'+
       '<div class="ef"><label>타입</label><select id="jt-type-'+i+'">'+typeOpts+'</select></div>'+
-      '<div class="ef"><label>전세가(만)</label><input id="jt-price-'+i+'" type="number" value="'+t.price+'" style="width:100px"></div>'+
+      '<div class="ef"><label>전세가(천)</label><input id="jt-price-'+i+'" type="number" value="'+t.price+'" style="width:100px"></div>'+
       '<div class="ef"><label>층</label><input id="jt-floor-'+i+'" type="number" value="'+(t.floor||'')+'" style="width:60px"></div>'+
       '<div class="ef"><label>계약일</label><input id="jt-date-'+i+'" type="date" value="'+(t.date?t.date.slice(0,4)+'-'+t.date.slice(4,6)+'-'+t.date.slice(6,8):'')+'" style="width:135px"></div>'+
       '<button class="btn btn-p btn-sm" onclick="saveEditJs(\''+cid+'\',\''+month+'\','+i+')"><i class="ti ti-check"></i>저장</button>'+
@@ -1214,7 +1236,7 @@ function renderJeonseList(cid,month){
       '</div></td></tr>';
   });
   el.innerHTML='<div class="sum-box" style="background:#E0F0FF">'+items.length+'건 · '+sumHTML+'</div>'+
-    '<div class="tw"><table><thead><tr><th>#</th><th>타입</th><th>전세가(만)</th><th>층</th><th>계약일</th><th>수정</th><th>삭제</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+    '<div class="tw"><table><thead><tr><th>#</th><th>타입</th><th>전세가(천)</th><th>층</th><th>계약일</th><th>수정</th><th>삭제</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
   items.forEach(function(t,i){var s=document.getElementById('jt-type-'+i);if(s)s.value=t.typeName;});
 }
 function startEditJs(i){document.getElementById('js-row-'+i).style.background='var(--bg2)';document.getElementById('js-edit-'+i).style.display='table-row';}
@@ -1284,8 +1306,8 @@ function renderWolseList(cid,month){
       '<tr id="ws-edit-'+i+'" class="edit-row"><td colspan="8">'+
       '<div class="edit-inner">'+
       '<div class="ef"><label>타입</label><select id="wt-type-'+i+'">'+typeOpts+'</select></div>'+
-      '<div class="ef"><label>보증금(만)</label><input id="wt-dep-'+i+'" type="number" value="'+t.deposit+'" style="width:90px"></div>'+
-      '<div class="ef"><label>월세(만)</label><input id="wt-rent-'+i+'" type="number" value="'+t.rent+'" style="width:80px"></div>'+
+      '<div class="ef"><label>보증금(천)</label><input id="wt-dep-'+i+'" type="number" value="'+t.deposit+'" style="width:90px"></div>'+
+      '<div class="ef"><label>월세(천)</label><input id="wt-rent-'+i+'" type="number" value="'+t.rent+'" style="width:80px"></div>'+
       '<div class="ef"><label>층</label><input id="wt-floor-'+i+'" type="number" value="'+(t.floor||'')+'" style="width:60px"></div>'+
       '<div class="ef"><label>계약일</label><input id="wt-date-'+i+'" type="date" value="'+(t.date?t.date.slice(0,4)+'-'+t.date.slice(4,6)+'-'+t.date.slice(6,8):'')+'" style="width:135px"></div>'+
       '<button class="btn btn-p btn-sm" onclick="saveEditWs(\''+cid+'\',\''+month+'\','+i+')"><i class="ti ti-check"></i>저장</button>'+
@@ -1293,7 +1315,7 @@ function renderWolseList(cid,month){
       '</div></td></tr>';
   });
   el.innerHTML='<div class="sum-box" style="background:#FFF0E0">'+items.length+'건 · '+sumHTML+'</div>'+
-    '<div class="tw"><table><thead><tr><th>#</th><th>타입</th><th>보증금(만)</th><th>월세(만)</th><th>층</th><th>계약일</th><th>수정</th><th>삭제</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+    '<div class="tw"><table><thead><tr><th>#</th><th>타입</th><th>보증금(천)</th><th>월세(천)</th><th>층</th><th>계약일</th><th>수정</th><th>삭제</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
   items.forEach(function(t,i){var s=document.getElementById('wt-type-'+i);if(s)s.value=t.typeName;});
 }
 function startEditWs(i){document.getElementById('ws-row-'+i).style.background='var(--bg2)';document.getElementById('ws-edit-'+i).style.display='table-row';}
@@ -1642,21 +1664,23 @@ function processCSV(file,cid,type){
 
         if(!monthGroups[tm])monthGroups[tm]=[];
 
+        // 국토부 실거래가 CSV의 금액 컬럼은 항상 만원 단위이므로, 프로그램 내부 단위(천원)에
+        // 맞춰 ×10 해서 저장한다.
         if(type==='trade'){
-          const price=parseFloat((ci_price>=0?row.__vals[ci_price]:'').replace(/,/g,''))||0;
+          const price=(parseFloat((ci_price>=0?row.__vals[ci_price]:'').replace(/,/g,''))||0)*10;
           if(!price)return;
           const day_tr=ci_day>=0?(parseInt(row.__vals[ci_day])||0):0;
           monthGroups[tm].push({typeName:best.typeName,price,floor,date:tm.replace('.','')+String(day_tr).padStart(2,'0')});
         } else if(type==='jeonse'){
           // 보증금(만원) = 전세금
-          const price=parseFloat((ci_dep>=0?row.__vals[ci_dep]:'').replace(/,/g,''))||0;
+          const price=(parseFloat((ci_dep>=0?row.__vals[ci_dep]:'').replace(/,/g,''))||0)*10;
           if(!price)return;
           const day_js=ci_day>=0?(parseInt(row.__vals[ci_day])||0):0;
           monthGroups[tm].push({typeName:best.typeName,price,floor,date:tm.replace('.','')+String(day_js).padStart(2,'0')});
         } else {
           // 월세: 보증금(K열) + 월세금(L열)
-          const deposit=parseFloat((ci_dep>=0?row.__vals[ci_dep]:'').replace(/,/g,''))||0;
-          const rent=parseFloat((ci_rent>=0?row.__vals[ci_rent]:'').replace(/,/g,''))||0;
+          const deposit=(parseFloat((ci_dep>=0?row.__vals[ci_dep]:'').replace(/,/g,''))||0)*10;
+          const rent=(parseFloat((ci_rent>=0?row.__vals[ci_rent]:'').replace(/,/g,''))||0)*10;
           if(!rent)return;
           const day_ws=ci_day>=0?(parseInt(row.__vals[ci_day])||0):0;
           monthGroups[tm].push({typeName:best.typeName,deposit,rent,floor,date:tm.replace('.','')+String(day_ws).padStart(2,'0')});
@@ -1713,7 +1737,7 @@ function importRentCSV(){
         ex.push(t);added++;
         if(t.date)allAdded.push(t.date);
       } else {
-        dupDetails.push(m+' '+t.typeName+' '+(t.price!=null?t.price+'만':(t.deposit+'/'+t.rent))+' '+t.floor+'층 ('+t.date+')');
+        dupDetails.push(m+' '+t.typeName+' '+(t.price!=null?t.price+'천':(t.deposit+'/'+t.rent))+' '+t.floor+'층 ('+t.date+')');
       }
     });
     total+=added;dup+=(items.length-added);
@@ -1794,7 +1818,7 @@ function renderDataView(cid){
         '<td style="font-weight:700">'+t.price.toLocaleString()+'</td>'+
         '<td>'+(t.floor||'-')+'</td>'+
         '<td>'+fmtDate(t.date)+'</td>'+
-        '<td>'+(pyBase?Math.round(t.price/pyBase).toLocaleString()+'만':'-')+'</td>'+
+        '<td>'+(pyBase?Math.round(t.price/pyBase).toLocaleString()+'천':'-')+'</td>'+
         '<td>'+
           '<button class="btn btn-edit btn-sm" onclick="dvStartEdit(\''+cid+'\',\''+m+'\','+i+',\'trade\')"><i class="ti ti-pencil"></i></button> '+
           '<button class="btn btn-d btn-sm" onclick="dvDel(\''+cid+'\',\''+m+'\','+i+',\'trade\')"><i class="ti ti-x"></i></button>'+
@@ -1803,7 +1827,7 @@ function renderDataView(cid){
         '</tr>'+
         '<tr id="dv-tr-edit-'+m+'-'+i+'" class="edit-row"><td colspan="8"><div class="edit-inner">'+
         '<div class="ef"><label>타입</label><select id="dv-tr-type-'+m+'-'+i+'">'+typeOpts+'</select></div>'+
-        '<div class="ef"><label>거래가(만)</label><input id="dv-tr-price-'+m+'-'+i+'" type="number" value="'+t.price+'" style="width:100px"></div>'+
+        '<div class="ef"><label>거래가(천)</label><input id="dv-tr-price-'+m+'-'+i+'" type="number" value="'+t.price+'" style="width:100px"></div>'+
         '<div class="ef"><label>층</label><input id="dv-tr-floor-'+m+'-'+i+'" type="number" value="'+(t.floor||'')+'" style="width:60px"></div>'+
         '<div class="ef"><label>계약일</label><input id="dv-tr-date-'+m+'-'+i+'" type="date" value="'+(t.date?t.date.slice(0,4)+'-'+t.date.slice(4,6)+'-'+t.date.slice(6,8):'')+'" style="width:135px"></div>'+
         '<button class="btn btn-p btn-sm" onclick="dvSaveEdit(\''+cid+'\',\''+m+'\','+i+',\'trade\')"><i class="ti ti-check"></i>저장</button>'+
@@ -1831,7 +1855,7 @@ function renderDataView(cid){
         '</td></tr>'+
         '<tr id="dv-js-edit-'+m+'-'+i+'" class="edit-row"><td colspan="6"><div class="edit-inner">'+
         '<div class="ef"><label>타입</label><select id="dv-js-type-'+m+'-'+i+'">'+typeOpts+'</select></div>'+
-        '<div class="ef"><label>전세가(만)</label><input id="dv-js-price-'+m+'-'+i+'" type="number" value="'+t.price+'" style="width:100px"></div>'+
+        '<div class="ef"><label>전세가(천)</label><input id="dv-js-price-'+m+'-'+i+'" type="number" value="'+t.price+'" style="width:100px"></div>'+
         '<div class="ef"><label>층</label><input id="dv-js-floor-'+m+'-'+i+'" type="number" value="'+(t.floor||'')+'" style="width:60px"></div>'+
         '<div class="ef"><label>계약일</label><input id="dv-js-date-'+m+'-'+i+'" type="date" value="'+(t.date?t.date.slice(0,4)+'-'+t.date.slice(4,6)+'-'+t.date.slice(6,8):'')+'" style="width:135px"></div>'+
         '<button class="btn btn-p btn-sm" onclick="dvSaveEdit(\''+cid+'\',\''+m+'\','+i+',\'jeonse\')"><i class="ti ti-check"></i>저장</button>'+
@@ -1859,8 +1883,8 @@ function renderDataView(cid){
         '</td></tr>'+
         '<tr id="dv-ws-edit-'+m+'-'+i+'" class="edit-row"><td colspan="7"><div class="edit-inner">'+
         '<div class="ef"><label>타입</label><select id="dv-ws-type-'+m+'-'+i+'">'+typeOpts+'</select></div>'+
-        '<div class="ef"><label>보증금(만)</label><input id="dv-ws-dep-'+m+'-'+i+'" type="number" value="'+t.deposit+'" style="width:90px"></div>'+
-        '<div class="ef"><label>월세(만)</label><input id="dv-ws-rent-'+m+'-'+i+'" type="number" value="'+t.rent+'" style="width:80px"></div>'+
+        '<div class="ef"><label>보증금(천)</label><input id="dv-ws-dep-'+m+'-'+i+'" type="number" value="'+t.deposit+'" style="width:90px"></div>'+
+        '<div class="ef"><label>월세(천)</label><input id="dv-ws-rent-'+m+'-'+i+'" type="number" value="'+t.rent+'" style="width:80px"></div>'+
         '<div class="ef"><label>층</label><input id="dv-ws-floor-'+m+'-'+i+'" type="number" value="'+(t.floor||'')+'" style="width:60px"></div>'+
         '<div class="ef"><label>계약일</label><input id="dv-ws-date-'+m+'-'+i+'" type="date" value="'+(t.date?t.date.slice(0,4)+'-'+t.date.slice(4,6)+'-'+t.date.slice(6,8):'')+'" style="width:135px"></div>'+
         '<button class="btn btn-p btn-sm" onclick="dvSaveEdit(\''+cid+'\',\''+m+'\','+i+',\'wolse\')"><i class="ti ti-check"></i>저장</button>'+
@@ -1880,9 +1904,9 @@ function renderDataView(cid){
       tns.forEach(function(tn,i){
         var a=al.find(x=>x.typeName===tn)||{};var k=kl.find(x=>x.typeName===tn)||{};
         rows+='<tr><td>'+(i===0?m:'')+'</td><td style="font-weight:600">'+(tn||'(없음)')+'</td>'+
-          '<td>'+(a.lo?a.lo.toLocaleString()+'만':'<span class="nc">-</span>')+'</td>'+
-          '<td>'+(a.hi?a.hi.toLocaleString()+'만':'<span class="nc">-</span>')+'</td>'+
-          '<td>'+(k.avg?k.avg.toLocaleString()+'만':'<span class="nc">-</span>')+'</td></tr>';
+          '<td>'+(a.lo?a.lo.toLocaleString()+'천':'<span class="nc">-</span>')+'</td>'+
+          '<td>'+(a.hi?a.hi.toLocaleString()+'천':'<span class="nc">-</span>')+'</td>'+
+          '<td>'+(k.avg?k.avg.toLocaleString()+'천':'<span class="nc">-</span>')+'</td></tr>';
       });
     });
     return rows;
@@ -1914,7 +1938,7 @@ function renderDataView(cid){
     dvClearBtn('실거래','trades',trCnt)+
     '</div>'+
     '<div class="tw" style="margin-bottom:14px"><table>'+
-    '<thead><tr><th>월</th><th>타입</th><th>거래가(만)</th><th>층</th><th>계약일</th><th>평당가(만)</th><th>수정/삭제</th><th></th></tr></thead>'+
+    '<thead><tr><th>월</th><th>타입</th><th>거래가(천)</th><th>층</th><th>계약일</th><th>평당가(천)</th><th>수정/삭제</th><th></th></tr></thead>'+
     '<tbody>'+trRows+'</tbody></table></div>'+
     '<div style="display:flex;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:4px">'+
     '<div class="sec" style="margin-bottom:0">📌 호가·KB시세</div>'+
@@ -1930,7 +1954,7 @@ function renderDataView(cid){
       dvClearBtn('전세','jeonse',jsCnt)+
       '</div>'+
       '<div class="tw" style="margin-bottom:14px"><table>'+
-      '<thead><tr><th>월</th><th>타입</th><th>전세가(만)</th><th>층</th><th>계약일</th><th>수정/삭제</th></tr></thead>'+
+      '<thead><tr><th>월</th><th>타입</th><th>전세가(천)</th><th>층</th><th>계약일</th><th>수정/삭제</th></tr></thead>'+
       '<tbody>'+jsRows+'</tbody></table></div>':'')+
     (wsRows?
       '<div style="display:flex;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:4px">'+
@@ -1938,7 +1962,7 @@ function renderDataView(cid){
       dvClearBtn('월세','wolse',wsCnt)+
       '</div>'+
       '<div class="tw"><table>'+
-      '<thead><tr><th>월</th><th>타입</th><th>보증금(만)</th><th>월세(만)</th><th>층</th><th>계약일</th><th>수정/삭제</th></tr></thead>'+
+      '<thead><tr><th>월</th><th>타입</th><th>보증금(천)</th><th>월세(천)</th><th>층</th><th>계약일</th><th>수정/삭제</th></tr></thead>'+
       '<tbody>'+wsRows+'</tbody></table></div>':'');
 
   // 수정 셀렉트 초기값 설정
@@ -2104,17 +2128,17 @@ function renderResult(){
           '<td>'+r.t.exclPy+'평</td>'+
           '<td>'+r.dispPy+'평</td>'+
           '<td>'+r.t.units+'</td>'+
-          '<td>'+(r.ts?r.ts.min.toLocaleString()+'만':'<span class="nc">-</span>')+'</td>'+
-          '<td>'+(r.ts?r.ts.max.toLocaleString()+'만':'<span class="nc">-</span>')+'</td>'+
-          '<td>'+(r.ts?Math.round(r.ts.avg).toLocaleString()+'만':'<span class="nc">-</span>')+'</td>'+
+          '<td>'+(r.ts?r.ts.min.toLocaleString()+'천':'<span class="nc">-</span>')+'</td>'+
+          '<td>'+(r.ts?r.ts.max.toLocaleString()+'천':'<span class="nc">-</span>')+'</td>'+
+          '<td>'+(r.ts?Math.round(r.ts.avg).toLocaleString()+'천':'<span class="nc">-</span>')+'</td>'+
           '<td>'+(r.ts?P(r.ts.avg,r.pyBase):'<span class="nc">-</span>')+'</td>'+
           '<td>'+(r.ts?r.ts.cnt:'<span class="nc">-</span>')+'</td>'+
-          '<td>'+(r.ask?.lo?r.ask.lo.toLocaleString()+'만':'<span class="nc">-</span>')+'</td>'+
-          '<td>'+(r.ask?.hi?r.ask.hi.toLocaleString()+'만':'<span class="nc">-</span>')+'</td>'+
-          '<td>'+(aa?Math.round(aa).toLocaleString()+'만':'<span class="nc">-</span>')+'</td>'+
+          '<td>'+(r.ask?.lo?r.ask.lo.toLocaleString()+'천':'<span class="nc">-</span>')+'</td>'+
+          '<td>'+(r.ask?.hi?r.ask.hi.toLocaleString()+'천':'<span class="nc">-</span>')+'</td>'+
+          '<td>'+(aa?Math.round(aa).toLocaleString()+'천':'<span class="nc">-</span>')+'</td>'+
           '<td>'+(aa?P(aa,r.pyBase):'<span class="nc">-</span>')+'</td>'+
           '<td>'+(r.ask?.cnt||'<span class="nc">-</span>')+'</td>'+
-          '<td>'+(r.kb?.avg?r.kb.avg.toLocaleString()+'만':'<span class="nc">-</span>')+'</td>'+
+          '<td>'+(r.kb?.avg?r.kb.avg.toLocaleString()+'천':'<span class="nc">-</span>')+'</td>'+
           '<td>'+(r.kb?.avg?P(r.kb.avg,r.pyBase):'<span class="nc">-</span>')+'</td>'+
           '</tr>';
       });
@@ -2126,15 +2150,15 @@ function renderResult(){
           '<td>'+ga.avgDisp+'평</td>'+
           '<td>'+ga.totU+'</td>'+
           '<td colspan="2"><span class="nc">-</span></td>'+
-          '<td>'+(ga.trAvg?ga.trAvg.toLocaleString()+'만':'<span class="nc">-</span>')+'</td>'+
-          '<td>'+(ga.trPy?ga.trPy.toLocaleString()+'만':'<span class="nc">-</span>')+'</td>'+
+          '<td>'+(ga.trAvg?ga.trAvg.toLocaleString()+'천':'<span class="nc">-</span>')+'</td>'+
+          '<td>'+(ga.trPy?ga.trPy.toLocaleString()+'천':'<span class="nc">-</span>')+'</td>'+
           '<td>'+(ga.trCnt?ga.trCnt:'<span class="nc">-</span>')+'</td>'+
           '<td colspan="2"><span class="nc">-</span></td>'+
-          '<td>'+(ga.askAvg?ga.askAvg.toLocaleString()+'만':'<span class="nc">-</span>')+'</td>'+
-          '<td>'+(ga.askPy?ga.askPy.toLocaleString()+'만':'<span class="nc">-</span>')+'</td>'+
+          '<td>'+(ga.askAvg?ga.askAvg.toLocaleString()+'천':'<span class="nc">-</span>')+'</td>'+
+          '<td>'+(ga.askPy?ga.askPy.toLocaleString()+'천':'<span class="nc">-</span>')+'</td>'+
           '<td><span class="nc">-</span></td>'+
-          '<td>'+(ga.kbAvg?ga.kbAvg.toLocaleString()+'만':'<span class="nc">-</span>')+'</td>'+
-          '<td>'+(ga.kbPy?ga.kbPy.toLocaleString()+'만':'<span class="nc">-</span>')+'</td>'+
+          '<td>'+(ga.kbAvg?ga.kbAvg.toLocaleString()+'천':'<span class="nc">-</span>')+'</td>'+
+          '<td>'+(ga.kbPy?ga.kbPy.toLocaleString()+'천':'<span class="nc">-</span>')+'</td>'+
           '</tr>';
         if(ga.gaY1!=null||ga.gaY2!=null){
           rows+='<tr class="tr-group-avg">'+
@@ -2143,8 +2167,8 @@ function renderResult(){
             '<td colspan="3"><span class="nc">-</span></td>'+
             '<td colspan="2"><span class="nc">-</span></td>'+
             '<td colspan="2"><span class="nc">-</span></td>'+
-            '<td>'+(ga.stdDep!=null?ga.stdDep.toLocaleString()+'만':'<span class="nc">-</span>')+'</td>'+
-            '<td>'+(ga.convRent!=null?ga.convRent.toLocaleString()+'만':'<span class="nc">-</span>')+'</td>'+
+            '<td>'+(ga.stdDep!=null?ga.stdDep.toLocaleString()+'천':'<span class="nc">-</span>')+'</td>'+
+            '<td>'+(ga.convRent!=null?ga.convRent.toLocaleString()+'천':'<span class="nc">-</span>')+'</td>'+
             '<td style="font-weight:700;color:var(--pd)">'+(ga.gaY1!=null?ga.gaY1.toFixed(1)+'%':'<span class="nc">-</span>')+'</td>'+
             '<td style="font-weight:700;color:var(--pd)">'+(ga.gaY2!=null?ga.gaY2.toFixed(1)+'%':'<span class="nc">-</span>')+'</td>'+
             '</tr>';
@@ -2171,9 +2195,9 @@ function renderResult(){
           rows+='<tr>'+
             '<td style="font-weight:700">'+(r.tn||'-')+'</td>'+
             '<td>'+yd.jCnt+'</td>'+
-            '<td>'+(yd.jsAvg?Math.round(yd.jsAvg).toLocaleString()+'만':'<span class="nc">-</span>')+'</td>'+
+            '<td>'+(yd.jsAvg?Math.round(yd.jsAvg).toLocaleString()+'천':'<span class="nc">-</span>')+'</td>'+
             '<td>'+(yd.jsAvg?P(yd.jsAvg,r.pyBase):'<span class="nc">-</span>')+'</td>'+
-            '<td>'+(yd.salePrice?Math.round(yd.salePrice).toLocaleString()+'만':'<span class="nc">-</span>')+'</td>'+
+            '<td>'+(yd.salePrice?Math.round(yd.salePrice).toLocaleString()+'천':'<span class="nc">-</span>')+'</td>'+
             '<td>'+(yd.jYield!=null?yd.jYield.toFixed(1)+'%':'<span class="nc">-</span>')+'</td>'+
             '</tr>';
         });
@@ -2185,9 +2209,9 @@ function renderResult(){
             rows+='<tr class="tr-group-avg">'+
               '<td style="font-weight:700;color:#000000">['+g.groupLabel+'] 평균</td>'+
               '<td>'+gJsCnt+'</td>'+
-              '<td>'+(ga.jsAvg?ga.jsAvg.toLocaleString()+'만':'<span class="nc">-</span>')+'</td>'+
-              '<td>'+(ga.jsPy?ga.jsPy.toLocaleString()+'만':'<span class="nc">-</span>')+'</td>'+
-              '<td>'+(ga.salePrice?ga.salePrice.toLocaleString()+'만':'<span class="nc">-</span>')+'</td>'+
+              '<td>'+(ga.jsAvg?ga.jsAvg.toLocaleString()+'천':'<span class="nc">-</span>')+'</td>'+
+              '<td>'+(ga.jsPy?ga.jsPy.toLocaleString()+'천':'<span class="nc">-</span>')+'</td>'+
+              '<td>'+(ga.salePrice?ga.salePrice.toLocaleString()+'천':'<span class="nc">-</span>')+'</td>'+
               '<td>'+(gaJYield!=null?gaJYield.toFixed(1)+'%':'<span class="nc">-</span>')+'</td>'+
               '</tr>';
           }
@@ -2198,12 +2222,12 @@ function renderResult(){
     jeonseSection='<div class="card">'+
       '<div class="sec">🏠 전세 현황 ('+rangeN+'개월)</div>'+
       '<div class="tw"><table>'+
-      '<thead><tr><th>타입</th><th>건수</th><th class="th-js">전세평균(만)</th><th class="th-js">전세평당가(만)</th><th>기준매매가(만)</th><th class="th-yi">전세가율(%)</th></tr></thead>'+
+      '<thead><tr><th>타입</th><th>건수</th><th class="th-js">전세평균(천)</th><th class="th-js">전세평당가(천)</th><th>기준매매가(천)</th><th class="th-yi">전세가율(%)</th></tr></thead>'+
       '<tbody>'+jRows+
       '<tr class="hl"><td>전체 평균</td><td>'+totJsCnt+'</td>'+
-      '<td>'+(wJsAvg?Math.round(wJsAvg).toLocaleString()+'만':'<span class="nc">-</span>')+'</td>'+
-      '<td>'+(wJsPy?wJsPy.toLocaleString()+'만':'<span class="nc">-</span>')+'</td>'+
-      '<td>'+(wJsSaleAvg?Math.round(wJsSaleAvg).toLocaleString()+'만':'<span class="nc">-</span>')+'</td>'+
+      '<td>'+(wJsAvg?Math.round(wJsAvg).toLocaleString()+'천':'<span class="nc">-</span>')+'</td>'+
+      '<td>'+(wJsPy?wJsPy.toLocaleString()+'천':'<span class="nc">-</span>')+'</td>'+
+      '<td>'+(wJsSaleAvg?Math.round(wJsSaleAvg).toLocaleString()+'천':'<span class="nc">-</span>')+'</td>'+
       '<td>'+(wJYield?wJYield.toFixed(1)+'%':'<span class="nc">-</span>')+'</td>'+
       '</tr>'+
       '</tbody></table></div>'+
@@ -2237,7 +2261,7 @@ function renderResult(){
             '<td>'+Math.round(wr.rentAvg).toLocaleString()+'</td>'+
             '<td style="background:var(--pl)">'+wr.stdDep.toLocaleString()+'</td>'+
             '<td style="background:var(--pl)">'+Math.round(wr.convRentAvg).toLocaleString()+'</td>'+
-            '<td>'+(yd.salePrice?Math.round(yd.salePrice).toLocaleString()+'만':'<span class="nc">-</span>')+'</td>'+
+            '<td>'+(yd.salePrice?Math.round(yd.salePrice).toLocaleString()+'천':'<span class="nc">-</span>')+'</td>'+
             '<td style="font-weight:700;color:var(--pd)">'+(y?.y1!=null?y.y1.toFixed(1)+'%':'<span class="nc">-</span>')+'</td>'+
             '<td style="font-weight:700;color:var(--pd)">'+(y?.y2!=null?y.y2.toFixed(1)+'%':'<span class="nc">-</span>')+'</td>'+
             '</tr>';
@@ -2252,7 +2276,7 @@ function renderResult(){
               '<td colspan="2"><span class="nc">-</span></td>'+
               '<td style="background:var(--pl)">'+(ga.stdDep!=null?ga.stdDep.toLocaleString():'<span class="nc">-</span>')+'</td>'+
               '<td style="background:var(--pl)">'+(ga.convRent?ga.convRent.toLocaleString():'<span class="nc">-</span>')+'</td>'+
-              '<td>'+(ga.salePrice?ga.salePrice.toLocaleString()+'만':'<span class="nc">-</span>')+'</td>'+
+              '<td>'+(ga.salePrice?ga.salePrice.toLocaleString()+'천':'<span class="nc">-</span>')+'</td>'+
               '<td style="font-weight:700;color:var(--pd)">'+(ga.gaY1!=null?ga.gaY1.toFixed(1)+'%':'<span class="nc">-</span>')+'</td>'+
               '<td style="font-weight:700;color:var(--pd)">'+(ga.gaY2!=null?ga.gaY2.toFixed(1)+'%':'<span class="nc">-</span>')+'</td>'+
               '</tr>';
@@ -2264,15 +2288,15 @@ function renderResult(){
     wolseSection='<div class="card">'+
       '<div class="sec">💰 월세·수익률 현황 ('+rangeN+'개월)</div>'+
       '<div class="tw"><table>'+
-      '<thead><tr><th>타입</th><th>건수</th><th class="th-ws">평균보증금(만)</th><th class="th-ws">평균월세(만)</th>'+
-      '<th class="th-yi">환산보증금(만)</th><th class="th-yi">환산월세(만)</th>'+
-      '<th>기준매매가(만)</th><th class="th-yi">수익률 대출X</th><th class="th-yi">수익률 대출50%</th>'+
+      '<thead><tr><th>타입</th><th>건수</th><th class="th-ws">평균보증금(천)</th><th class="th-ws">평균월세(천)</th>'+
+      '<th class="th-yi">환산보증금(천)</th><th class="th-yi">환산월세(천)</th>'+
+      '<th>기준매매가(천)</th><th class="th-yi">수익률 대출X</th><th class="th-yi">수익률 대출50%</th>'+
       '</tr></thead><tbody>'+wRows+
       '<tr class="hl"><td>전체 평균</td><td>'+totWsCnt+'</td>'+
       '<td colspan="2">-</td>'+
       '<td style="background:var(--pl)">'+(wStdDep?wStdDep.toLocaleString():'<span class="nc">-</span>')+'</td>'+
       '<td style="background:var(--pl)">'+(wWsConvRentAvg?Math.round(wWsConvRentAvg).toLocaleString():'<span class="nc">-</span>')+'</td>'+
-      '<td>'+(wWsSaleAvg?Math.round(wWsSaleAvg).toLocaleString()+'만':'<span class="nc">-</span>')+'</td>'+
+      '<td>'+(wWsSaleAvg?Math.round(wWsSaleAvg).toLocaleString()+'천':'<span class="nc">-</span>')+'</td>'+
       '<td style="font-weight:700;color:var(--pd)">'+(wY1!=null?wY1.toFixed(1)+'%':'<span class="nc">-</span>')+'</td>'+
       '<td style="font-weight:700;color:var(--pd)">'+(wY2!=null?wY2.toFixed(1)+'%':'<span class="nc">-</span>')+'</td>'+
       '</tr></tbody></table></div>'+
@@ -2329,7 +2353,7 @@ function renderResult(){
   // 5. 월별 실거래 상세
   const detailSection='<div class="card"><div class="sec">월별 실거래 상세 (타입별)</div>'+
     '<div class="tw"><table>'+
-    '<thead><tr><th>월</th><th>타입</th><th>최저(만)</th><th>최고(만)</th><th>평균(만)</th><th>평당가(만)</th><th>건수</th></tr></thead>'+
+    '<thead><tr><th>월</th><th>타입</th><th>최저(천)</th><th>최고(천)</th><th>평균(천)</th><th>평당가(천)</th><th>건수</th></tr></thead>'+
     '<tbody>'+last12.flatMap(function(m){
       var md=DB.marketData[cid]?.[m];
       if(!md||!md.trades.length)return['<tr><td>'+m+'</td><td colspan="6" class="nc">없음</td></tr>'];
@@ -2357,17 +2381,17 @@ function renderResult(){
     '<div class="metrics">'+
     '<div class="metric"><div class="v">'+totUnits.toLocaleString()+'</div><div class="l">총 '+unitLabel+'수</div></div>'+
     '<div class="metric"><div class="v">'+totTr+'</div><div class="l">최근 12개월 실거래</div></div>'+
-    '<div class="metric"><div class="v">'+(wTrAvg!=null?Math.round(wTrAvg).toLocaleString()+'만':'-')+'</div><div class="l">실거래 단지평균</div></div>'+
-    '<div class="metric"><div class="v">'+(wTrPy!=null?wTrPy.toLocaleString()+'만':'-')+'</div><div class="l">실거래 평당가</div></div>'+
-    '<div class="metric"><div class="v">'+(wKbAvg!=null?Math.round(wKbAvg).toLocaleString()+'만':'-')+'</div><div class="l">KB시세 평균</div></div>'+
+    '<div class="metric"><div class="v">'+(wTrAvg!=null?Math.round(wTrAvg).toLocaleString()+'천':'-')+'</div><div class="l">실거래 단지평균</div></div>'+
+    '<div class="metric"><div class="v">'+(wTrPy!=null?wTrPy.toLocaleString()+'천':'-')+'</div><div class="l">실거래 평당가</div></div>'+
+    '<div class="metric"><div class="v">'+(wKbAvg!=null?Math.round(wKbAvg).toLocaleString()+'천':'-')+'</div><div class="l">KB시세 평균</div></div>'+
     '</div>'+
     '<div class="sec">평형별 시세 현황</div>'+
     '<div class="tw"><table>'+
     '<thead><tr>'+
     '<th rowspan="2">타입</th><th rowspan="2">전용(평)</th><th rowspan="2">'+sqmLabel+'</th><th rowspan="2">'+unitLabel+'수</th>'+
-    '<th colspan="5" class="th-tr">실거래가 ('+rangeN+'개월, 만원)</th>'+
-    '<th colspan="5" class="th-ask">호가 ('+(askM||'-')+', 만원)</th>'+
-    '<th colspan="2" class="th-kb">KB시세 ('+(kbM||'-')+', 만원)</th>'+
+    '<th colspan="5" class="th-tr">실거래가 ('+rangeN+'개월, 천원)</th>'+
+    '<th colspan="5" class="th-ask">호가 ('+(askM||'-')+', 천원)</th>'+
+    '<th colspan="2" class="th-kb">KB시세 ('+(kbM||'-')+', 천원)</th>'+
     '</tr><tr>'+
     '<th class="th-tr">최저</th><th class="th-tr">최고</th><th class="th-tr">평균</th><th class="th-tr">평당가</th><th class="th-tr">건수</th>'+
     '<th class="th-ask">최저</th><th class="th-ask">최고</th><th class="th-ask">평균</th><th class="th-ask">평당가</th><th class="th-ask">매물건수</th>'+
@@ -2378,12 +2402,12 @@ function renderResult(){
     '<td colspan="3" style="text-align:left;padding-left:8px">단지 전체 평균</td>'+
     '<td>'+totUnits+'</td>'+
     '<td>'+N(wTrMin)+'</td><td>'+N(wTrMax)+'</td><td>'+N(wTrAvg)+'</td>'+
-    '<td>'+(wTrPy!=null?wTrPy.toLocaleString()+'만':'<span class="nc">-</span>')+'</td>'+
+    '<td>'+(wTrPy!=null?wTrPy.toLocaleString()+'천':'<span class="nc">-</span>')+'</td>'+
     '<td>'+(totTrCnt>0?totTrCnt:'<span class="nc">-</span>')+'</td>'+
     '<td colspan="2">-</td>'+
-    '<td>'+N(wAskAvg)+'</td><td>'+(wAskPy!=null?wAskPy.toLocaleString()+'만':'<span class="nc">-</span>')+'</td>'+
+    '<td>'+N(wAskAvg)+'</td><td>'+(wAskPy!=null?wAskPy.toLocaleString()+'천':'<span class="nc">-</span>')+'</td>'+
     '<td>'+(totalListings!=null?totalListings+'건':'<span class="nc">-</span>')+'</td>'+
-    '<td>'+N(wKbAvg)+'</td><td>'+(wKbPy!=null?wKbPy.toLocaleString()+'만':'<span class="nc">-</span>')+'</td>'+
+    '<td>'+N(wKbAvg)+'</td><td>'+(wKbPy!=null?wKbPy.toLocaleString()+'천':'<span class="nc">-</span>')+'</td>'+
     '</tr></tbody></table></div>'+
     '<p class="hint" style="margin-top:6px">* 평당가 기준: '+(oft?'전용평형 (오피스텔)':'공급평형 (아파트)')+'</p></div>'+
     rangeHintSection+jeonseSection+wolseSection+cntSection+typeCntSection+detailSection;
@@ -2519,7 +2543,7 @@ function exportExcel(){
     const ac='$'+_COLS[areaColIdx+1]+'$'+rowNum;
     return 'IFERROR(IF(AND(ISNUMBER('+pc+'),ISNUMBER('+ac+')),ROUND('+pc+'/'+ac+',0),"'+NA_TEXT+'"),"'+NA_TEXT+'")';
   }
-  // 환산보증금 기준(500/1000/2000/3000) 최빈값 — 프로그램(modeStdDep)과 동일하게 평균이 아닌 최빈값 채택.
+  // 환산보증금 기준(5000/10000/20000/30000천원) 최빈값 — 프로그램(modeStdDep)과 동일하게 평균이 아닌 최빈값 채택.
   // MODE.SNGL은 텍스트("시세없음")·빈 셀을 자동으로 무시하므로 별도 ISNUMBER 처리가 필요 없음.
   function _modeF(colIdx, rowNums){
     colIdx = colIdx + 1;
@@ -3034,6 +3058,7 @@ function impDB(e){
   r.onload=function(ev){
     try{
       DB=JSON.parse(ev.target.result);
+      migrateToCheonwon(); // 만원 단위로 저장된 옛 백업을 복원하는 경우 대비
       saveDB();initSels();renderCxList();renderExpList();
       // 복원 후 첫 단지 자동 선택 → loadInputForm 호출로 luBadge/계약일 즉시 표시
       if(DB.complexes.length>0){
