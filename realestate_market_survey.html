@@ -1526,16 +1526,16 @@ function processCSV(file,cid,type){
       const ci_name   =hdrs.findIndex(h=>h.includes('단지명'));
       const ci_sigungu=hdrs.findIndex(h=>h.includes('시군구'));
       // 번지(지번) — "번지" 단독 컬럼 우선, 없으면 본번+부번 조합으로 구성
-      const ci_bunji  =hdrs.findIndex(h=>h==='번지'||h.includes('번지'));
+      const ci_bunji  =hdrs.findIndex(h=>h.includes('번지'));
       const ci_bonbun =hdrs.findIndex(h=>h.includes('본번'));
       const ci_bubun  =hdrs.findIndex(h=>h.includes('부번'));
       const ci_doro   =hdrs.findIndex(h=>h.includes('도로명')&&!h.includes('건물')&&!h.includes('일련'));
       const ci_type   =hdrs.findIndex(h=>h.includes('전월세구분'));
       const ci_excl   =hdrs.findIndex(h=>h.includes('전용면적'));
       const ci_ym     =hdrs.findIndex(h=>h.includes('계약년월'));
-      const ci_floor  =hdrs.findIndex(h=>h==='층'||h.includes('층'));
+      const ci_floor  =hdrs.findIndex(h=>h.includes('층'));
       const ci_cancel =hdrs.findIndex(h=>h.includes('해제사유발생일'));
-      const ci_day    =hdrs.findIndex(h=>h==='계약일'||h.trim()==='계약일');
+      const ci_day    =hdrs.findIndex(h=>h.trim()==='계약일');
       // 매매: 거래금액
       const ci_price  =hdrs.findIndex(h=>h.includes('거래금액'));
       // 전월세: 보증금, 월세금
@@ -1799,7 +1799,7 @@ function renderDataView(cid){
           '<button class="btn btn-edit btn-sm" onclick="dvStartEdit(\''+cid+'\',\''+m+'\','+i+',\'trade\')"><i class="ti ti-pencil"></i></button> '+
           '<button class="btn btn-d btn-sm" onclick="dvDel(\''+cid+'\',\''+m+'\','+i+',\'trade\')"><i class="ti ti-x"></i></button>'+
         '</td>'+
-        '<td>'+(i===0?'<td rowspan="'+trades.length+'">'+btn+'</td>':'')+'</td>'+
+        (i===0?'<td rowspan="'+trades.length+'">'+btn+'</td>':'')+
         '</tr>'+
         '<tr id="dv-tr-edit-'+m+'-'+i+'" class="edit-row"><td colspan="8"><div class="edit-inner">'+
         '<div class="ef"><label>타입</label><select id="dv-tr-type-'+m+'-'+i+'">'+typeOpts+'</select></div>'+
@@ -2215,7 +2215,11 @@ function renderResult(){
   if(hasWolse){
     var totWsCnt=TR.reduce(function(a,r){return r.yd.wolseResult?a+r.yd.wolseResult.cnt:a;},0);
     var wWsConvRentAvg=wtdPrice(TR.filter(function(r){return r.yd.wolseResult;}),function(r){return r.yd.wolseResult.convRentAvg||0;});
-    var wWsSaleAvg=wtdPrice(TR.filter(function(r){return r.yd.wolseResult;}),function(r){return r.yd.salePrice||0;});
+    // 기준매매가는 그룹평균(calcGroupAvg)·엑셀 전체평균과 같은 방식으로 월세 유무와 무관하게
+    // 매매가가 있는 타입 전체를 가중평균한다 — 여기서만 wolseResult 있는 타입으로 한정해서
+    // 걸러내면, 월세는 없지만 실거래가는 있는 타입이 껴 있을 때 화면과 엑셀의 기준매매가(그래서
+    // 대출X/50% 수익률)가 서로 달라지는 불일치가 있었다.
+    var wWsSaleAvg=wtdPrice(TR,function(r){return r.yd.salePrice||0;});
     var wStdDep=modeStdDep(TR);
     var wY1=wWsSaleAvg&&wWsConvRentAvg&&wStdDep?(wWsConvRentAvg*12)/(wWsSaleAvg-wStdDep)*100:null;
     var wY2=wWsSaleAvg&&wWsConvRentAvg&&wStdDep?(function(){var la=wWsSaleAvg*0.5;var eq=wWsSaleAvg-la-wStdDep;return eq>0?(wWsConvRentAvg*12-la*0.045)/eq*100:null;})():null;
@@ -2971,13 +2975,9 @@ function exportExcel(){
           const prevCx=cxList[k];
           const prevAllM=sortM(Object.keys(DB.marketData[prevCx.id]||{}));
           if(!prevAllM.length)continue; // 데이터 없는 이전 단지는 블록을 만들지 않으므로 0행 기여 — return을 쓰면 현재 단지 전체의 흰색 처리가 스킵되는 버그였음
-          const prevRecM=prevAllM.slice(-rangeN);
-          const prevHasJ=prevRecM.some(m=>DB.marketData[prevCx.id]?.[m]?.jeonse?.length);
-          const prevHasW=prevRecM.some(m=>DB.marketData[prevCx.id]?.[m]?.wolse?.length);
-          const prevHasRent=prevHasJ||prevHasW;
           const prevTypes=prevCx.types.length;
           const prevGrps=[...new Set(prevCx.types.filter(t=>t.groupLabel).map(t=>t.groupLabel))].length;
-          startRow+=3+3+(prevHasRent?2:2)+prevTypes+prevGrps+1+1; // 빈3+단지3+헤더2+타입+그룹평균+전체평균+매물
+          startRow+=3+3+2+prevTypes+prevGrps+1+1; // 빈3+단지3+헤더2+타입+그룹평균+전체평균+매물
         }
         // 단지명(startRow), 사용승인(startRow+1), 주차(startRow+2)
         for(let dr=0;dr<3;dr++){
