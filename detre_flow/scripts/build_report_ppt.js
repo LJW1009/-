@@ -200,9 +200,9 @@ function renderInfo(slide, b, y, bottomLimit) {
       fontFace: T.FONT, fontSize: 13, bold: true, color: s.fg, align: "center", valign: "middle", margin: 0 });
     slide.addText(s.d.value, { x: s.x, y: y + 0.36, w: CW, h: Math.max(0.36, upperH - 0.92),
       fontFace: T.FONT, fontSize: s.d.valueSize || 19, bold: true, color: s.fg, align: "center", valign: "middle", margin: 0 });
-    slide.addText(s.d.caption || "", { x: s.x, y: y + upperH - 0.54, w: CW, h: 0.24,
+    if (s.d.caption) slide.addText(s.d.caption, { x: s.x, y: y + upperH - 0.54, w: CW, h: 0.24,
       fontFace: T.FONT, fontSize: 10, bold: true, color: s.sub, align: "center", valign: "middle", margin: 0 });
-    slide.addText(s.d.note || "", { x: s.x, y: y + upperH - 0.31, w: CW, h: 0.24,
+    if (s.d.note) slide.addText(s.d.note, { x: s.x, y: y + upperH - 0.31, w: CW, h: 0.24,
       fontFace: T.FONT, fontSize: 10, bold: true, color: s.sub, align: "center", valign: "middle", margin: 0 });
   });
   if (b.before && b.after) {
@@ -270,7 +270,7 @@ function renderCompare(slide, b, y) {
       x: s.x, y: y, w: CW, h: H, rectRadius: 0.07,
       fill: { color: s.fill }, line: { color: s.fill, width: 0.5 } });
     slide.addText(s.d.label, {
-      x: s.x, y: y + 0.05, w: CW, h: 0.22,
+      x: s.x, y: y + 0.05, w: CW, h: 0.19,
       fontFace: T.FONT, fontSize: 9.5, bold: true, color: s.sub,
       align: "center", valign: "middle", margin: 0 });
     slide.addText(runs(s.d.value, { color: s.fg }), {
