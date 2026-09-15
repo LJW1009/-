@@ -892,6 +892,78 @@ function handleKbSiseUpload(e,cid){
   reader.readAsArrayBuffer(f);
 }
 
+// 네이버 부동산 매물 붙여넣기 (호가 자동 매칭)
+// "매매" 가격 줄 바로 다음 줄에 오는 "오피스텔/아파트 타입/면적m²" 줄을 짝지어 한 건의
+// 매물로 인식한다. "매매"로 시작하지 않는 줄(설명문 안의 상호명 등)은 가격으로 오인식되지 않는다.
+function parseNaverPriceSide(s){
+  const m=s.trim().match(/^(\d+)\s*억\s*([\d,]+)?/);
+  if(!m)return null;
+  const eok=parseInt(m[1],10);
+  const man=m[2]?parseInt(m[2].replace(/,/g,''),10):0;
+  return eok*10000+man; // 만원 단위
+}
+function parseNaverListings(text){
+  const lines=(text||'').split('\n').map(function(l){return l.trim();}).filter(function(l){return l;});
+  const listings=[];
+  let pending=null;
+  lines.forEach(function(line){
+    if(line.indexOf('매매')===0){
+      const parts=line.slice(2).split('~').map(function(s){return s.trim();});
+      const lo=parseNaverPriceSide(parts[0]);
+      const hi=parts.length>1?parseNaverPriceSide(parts[1]):lo;
+      if(lo!=null)pending={lo,hi:(hi!=null?hi:lo)};
+      return;
+    }
+    const tm=line.match(/^(오피스텔|아파트)\s*([^\/]+)\/\s*([\d.]+)\s*m/);
+    if(tm&&pending){
+      listings.push({typeCode:tm[2].trim(),area:parseFloat(tm[3]),lo:pending.lo,hi:pending.hi});
+      pending=null;
+    }
+  });
+  return listings;
+}
+// 등록된 타입 중 면적(오피스텔=계약/공급, 아파트=공급)이 가장 가까운 타입을 찾는다.
+// (KB시세 파일 매칭과 동일한 방식 — 네이버는 ㎡를 정수로 반올림해 보여주므로 오차 허용폭을 넓게 잡는다)
+function matchNaverType(cx,areaVal){
+  const oft=cx.type==='오피스텔';
+  let best=null,bestD=Infinity;
+  cx.types.forEach(function(t){
+    const ta=oft?(t.contract||t.supply||0):(t.supply||0);
+    const d=Math.abs(ta-areaVal);
+    if(d<bestD){bestD=d;best=t;}
+  });
+  return(best&&bestD<=1.5)?best:null;
+}
+function handleNaverPaste(cid){
+  const cx=DB.complexes.find(function(c){return c.id===cid;});if(!cx)return;
+  const ta=document.getElementById('naver-paste');
+  const text=ta?ta.value:'';
+  const listings=parseNaverListings(text);
+  if(!listings.length){showMsg('msg-naver','인식된 매물이 없습니다. 붙여넣은 텍스트를 확인해 주세요.','me');return;}
+  const byType={};
+  let unmatched=0;
+  listings.forEach(function(r){
+    const t=matchNaverType(cx,r.area);
+    if(!t){unmatched++;return;}
+    // 네이버 표시 가격(만원)을 프로그램 내부 단위(천원)에 맞춰 ×10
+    const lo=r.lo*10,hi=r.hi*10;
+    if(!byType[t.typeName])byType[t.typeName]={lo:Infinity,hi:-Infinity,cnt:0};
+    const b=byType[t.typeName];
+    b.lo=Math.min(b.lo,lo);b.hi=Math.max(b.hi,hi);b.cnt++;
+  });
+  let filled=0;
+  Object.keys(byType).forEach(function(tn){
+    const b=byType[tn];
+    const loEl=document.getElementById('al-'+encodeURIComponent(tn));
+    const hiEl=document.getElementById('ah-'+encodeURIComponent(tn));
+    const cntEl=document.getElementById('acnt-'+encodeURIComponent(tn));
+    if(loEl){loEl.value=b.lo;filled++;}
+    if(hiEl)hiEl.value=b.hi;
+    if(cntEl)cntEl.value=b.cnt;
+  });
+  showMsg('msg-naver',listings.length+'건 인식 · '+filled+'개 타입에 자동 채움'+(unmatched?' · 미매칭 '+unmatched+'건':'')+' — 저장 전까지 직접 수정 가능합니다.','ms');
+}
+
 // ═══════════════════════════════════════════════════════════
 // 데이터 입력 폼
 // ═══════════════════════════════════════════════════════════
@@ -979,6 +1051,15 @@ function loadInputForm(){
     // ── 호가 ──
     '<div id="it-ask">'+
     '<div id="lu-asking" style="font-size:12px;color:var(--t2);margin-bottom:10px">네이버 부동산 기준 · 천원 · 없으면 비워두세요'+luBadge('asking')+'<br><b style="color:var(--ad)">※ 결과 조회 시 가장 최신 입력월 기준으로 표시</b></div>'+
+    '<div style="margin-bottom:14px;padding:10px 12px;background:var(--bg2);border-radius:var(--r)">'+
+    '<div style="font-size:12px;color:var(--t2);margin-bottom:6px;font-weight:700">네이버 부동산 매물 붙여넣기 (자동 매칭)</div>'+
+    '<textarea id="naver-paste" rows="6" style="width:100%;padding:8px;border:1px solid var(--bdr);border-radius:var(--r);font-size:12px;font-family:inherit;background:var(--bg);color:var(--t1)" placeholder="네이버 부동산 매물 목록 페이지에서 복사한 텍스트를 그대로 붙여넣으세요."></textarea>'+
+    '<div style="margin-top:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">'+
+    '<button class="btn btn-sm" onclick="handleNaverPaste(\''+cid+'\')"><i class="ti ti-wand"></i>분석 후 자동 채움</button>'+
+    '<span style="font-size:11px;color:var(--t3)">타입별 최저가·최고가·매물건수를 아래 입력칸에 자동으로 채웁니다 (전용/공급·계약면적 기준 매칭). 저장 전까지 직접 수정 가능합니다.</span>'+
+    '</div>'+
+    '<div id="msg-naver" style="margin-top:6px"></div>'+
+    '</div>'+
     cx.types.map(function(t){
       var ex=md.asking.find(function(a){return a.typeName===t.typeName;})||{};
       return '<div class="row" style="align-items:flex-end">'+
