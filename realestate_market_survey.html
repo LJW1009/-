@@ -922,9 +922,17 @@ function parseNaverListings(text){
   });
   return listings;
 }
-// 등록된 타입 중 면적(오피스텔=계약/공급, 아파트=공급)이 가장 가까운 타입을 찾는다.
-// (KB시세 파일 매칭과 동일한 방식 — 네이버는 ㎡를 정수로 반올림해 보여주므로 오차 허용폭을 넓게 잡는다)
-function matchNaverType(cx,areaVal){
+// 타입 코드(예: "177OB")를 등록된 타입명과 우선 매칭하고, 일치하는 이름이 없을 때만
+// 면적(오피스텔=계약/공급, 아파트=공급)이 가장 가까운 타입으로 대체 매칭한다.
+// 같은 면적(㎡)이라도 타입명이 다른 경우(예: 177OB·176OA가 모두 84㎡)가 흔하므로
+// 면적만으로는 구분할 수 없어 타입명 매칭을 우선한다.
+function matchNaverType(cx,typeCode,areaVal){
+  const norm=function(s){return(s||'').toString().replace(/\s+/g,'').toUpperCase();};
+  const code=norm(typeCode);
+  if(code){
+    const exact=cx.types.find(function(t){return norm(t.typeName)===code;});
+    if(exact)return exact;
+  }
   const oft=cx.type==='오피스텔';
   let best=null,bestD=Infinity;
   cx.types.forEach(function(t){
@@ -943,7 +951,7 @@ function handleNaverPaste(cid){
   const byType={};
   let unmatched=0;
   listings.forEach(function(r){
-    const t=matchNaverType(cx,r.area);
+    const t=matchNaverType(cx,r.typeCode,r.area);
     if(!t){unmatched++;return;}
     // 네이버 표시 가격(만원)을 프로그램 내부 단위(천원)에 맞춰 ×10
     const lo=r.lo*10,hi=r.hi*10;
