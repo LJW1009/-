@@ -1,0 +1,9 @@
+{
+  "name": "law-update-html-program",
+  "version": "1.0.0",
+  "private": true,
+  "description": "law_update_program.html 조립에 필요한 의존성 (pdf.js)",
+  "dependencies": {
+    "pdfjs-dist": "3.11.174"
+  }
+}

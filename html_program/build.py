@@ -22,6 +22,9 @@ DETRE = os.path.join(ROOT, "detre_flow")
 ICON_DIR = os.path.join(DETRE, "assets", "icons")
 LOGO_PATH = os.path.join(DETRE, "assets", "cover_logo.png")
 BUNDLE_PATH = os.path.join(DETRE, "node_modules", "pptxgenjs", "dist", "pptxgen.bundle.js")
+PDFJS_DIR = os.path.join(HTML_DIR, "node_modules", "pdfjs-dist", "build")
+PDFJS_LIB_PATH = os.path.join(PDFJS_DIR, "pdf.min.js")
+PDFJS_WORKER_PATH = os.path.join(PDFJS_DIR, "pdf.worker.min.js")
 OUT_PATH = os.path.join(ROOT, "law_update_program.html")
 
 
@@ -45,19 +48,32 @@ def main():
             "pptxgen.bundle.js가 없습니다. 먼저 'cd detre_flow && npm install'을 실행하세요.\n"
             "찾은 경로: " + BUNDLE_PATH
         )
+    if not os.path.exists(PDFJS_LIB_PATH) or not os.path.exists(PDFJS_WORKER_PATH):
+        raise SystemExit(
+            "pdf.js가 없습니다. 먼저 'cd html_program && npm install'을 실행하세요.\n"
+            "찾은 경로: " + PDFJS_DIR
+        )
 
     bundle = open(BUNDLE_PATH, encoding="utf-8").read()
+    pdfjs_lib = open(PDFJS_LIB_PATH, encoding="utf-8").read()
+    pdfjs_worker = open(PDFJS_WORKER_PATH, encoding="utf-8").read()
     assets_js = build_assets_js()
     app_js = open(os.path.join(HTML_DIR, "app.js"), encoding="utf-8").read()
     ppt_js = open(os.path.join(HTML_DIR, "ppt.js"), encoding="utf-8").read()
+    report_ppt_js = open(os.path.join(HTML_DIR, "report_ppt.js"), encoding="utf-8").read()
+    pdf_extract_js = open(os.path.join(HTML_DIR, "pdf_extract.js"), encoding="utf-8").read()
     ui_js = open(os.path.join(HTML_DIR, "ui.js"), encoding="utf-8").read()
     shell = open(os.path.join(HTML_DIR, "shell.html"), encoding="utf-8").read()
 
     out = shell
+    out = out.replace("/*__PDFJS_WORKER__*/", pdfjs_worker)
+    out = out.replace("/*__PDFJS_LIB__*/", pdfjs_lib)
     out = out.replace("/*__PPTXGEN_BUNDLE__*/", bundle)
     out = out.replace("/*__ASSETS__*/", assets_js)
     out = out.replace("/*__APP_JS__*/", app_js)
     out = out.replace("/*__PPT_JS__*/", ppt_js)
+    out = out.replace("/*__REPORT_PPT_JS__*/", report_ppt_js)
+    out = out.replace("/*__PDF_EXTRACT_JS__*/", pdf_extract_js)
     out = out.replace("/*__UI_JS__*/", ui_js)
 
     with open(OUT_PATH, "w", encoding="utf-8") as f:

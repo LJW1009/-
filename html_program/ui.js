@@ -313,6 +313,70 @@ function initPptTab() {
   renderCards();
 
   $("#gen-ppt-btn").addEventListener("click", onGeneratePpt);
+  $("#pdf-file").addEventListener("change", onPdfSelected);
+  $("#gen-ppt-json-btn").addEventListener("click", onGeneratePptFromJson);
+}
+
+async function onPdfSelected(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  $("#pdf-status").textContent = "PDF 읽는 중...";
+  try {
+    const raw = await extractPdfText(file);
+    $("#pdf-raw-text").value = raw;
+    $("#pdf-raw-box").hidden = false;
+
+    const parsed = parsePressRelease(raw);
+    if (parsed.title) $("#ppt-title").value = parsed.title;
+    if (parsed.yearMonth) $("#ppt-yearmonth").value = parsed.yearMonth;
+    if (parsed.dateStr) $("#ppt-source").value = `보도자료 배포 ${parsed.dateStr}`;
+    if (parsed.bullets.length) {
+      state.ppt.items = parsed.bullets.slice(0, 5);
+      renderListInputs("#summary-items", state.ppt.items, "요약 항목", 5);
+    }
+    $("#pdf-status").innerHTML =
+      `<span class="ok">추출 완료 — 제목·연월·출처·요약 항목(${parsed.bullets.length}개)을 초안으로 채웠습니다. 아래에서 꼭 확인·수정하세요.` +
+      (parsed.bullets.length === 0 ? ' (하이라이트 불릿을 못 찾아 요약은 직접 입력해야 합니다.)' : '') + `</span>`;
+  } catch (err) {
+    console.error(err);
+    $("#pdf-status").innerHTML = `<span class="err">PDF 추출 실패: ${err.message}</span>`;
+  }
+}
+
+async function onGeneratePptFromJson() {
+  const box = $("#ppt-json-result");
+  box.innerHTML = "";
+  let spec;
+  try {
+    spec = JSON.parse($("#ppt-json-input").value);
+  } catch (err) {
+    box.appendChild(el("p", { class: "err", text: "JSON 파싱 오류: " + err.message }));
+    return;
+  }
+  if (!spec.meta) {
+    box.appendChild(el("p", { class: "err", text: "spec.json에 meta가 없습니다." }));
+    return;
+  }
+  const isFreeForm = Array.isArray(spec.slides);
+  const isFixed = spec.summary && spec.changes && spec.timeline;
+  if (!isFreeForm && !isFixed) {
+    box.appendChild(el("p", { class: "err", text: "spec.json 형식을 인식할 수 없습니다. slides[](자유구성) 또는 summary/changes/timeline(3장 고정) 구조여야 합니다." }));
+    return;
+  }
+  if (!spec.meta.fileTag) spec.meta.fileTag = "press";
+  try {
+    const blob = isFreeForm ? await buildReportPpt(spec) : await buildPressPpt(spec);
+    const filename = (spec.meta.fileTag || "press") + "_영업계획팀.pptx";
+    const dlBtn = el("button", { class: "btn-primary", type: "button", text: "⬇️ 결과 PPT 다운로드" }, []);
+    dlBtn.addEventListener("click", () => downloadBlob(blob, filename));
+    box.appendChild(el("p", { class: "ok", text: "PPT 생성 완료." }));
+    box.appendChild(dlBtn);
+    toast("PPT 생성 완료", "ok");
+  } catch (err) {
+    console.error(err);
+    box.appendChild(el("p", { class: "err", text: "생성 실패: " + err.message }));
+    toast("생성 실패: " + err.message, "err");
+  }
 }
 
 function renderListInputs(sel, arr, label, max, onAdd) {
