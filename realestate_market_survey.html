@@ -64,6 +64,9 @@ tbody tr:hover td{background:#f5f5f3}
 .snav{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap}
 .stab{padding:5px 12px;border-radius:var(--r);font-size:12px;cursor:pointer;border:1px solid var(--bdr);background:var(--bg);color:var(--t2);font-weight:500;transition:all .15s}
 .stab:hover{border-color:var(--bdr2);color:var(--t1)}.stab.active{background:var(--bg2);color:var(--t1);border-color:var(--bdr2);font-weight:700}
+.chk-item{display:inline-flex;align-items:center;gap:4px;cursor:pointer;font-size:12px;white-space:nowrap;padding:4px 8px;border:1px solid var(--bdr);border-radius:var(--r);background:var(--bg)}
+.chk-item input{width:13px;height:13px;accent-color:var(--bl);flex-shrink:0}
+.chk-div{width:1px;align-self:stretch;background:var(--bdr);margin:0 2px}
 .hl td{background:#FFF3E0!important;font-weight:700}
 .tr-group-avg td{background:#E2EFDA;color:#000000;font-weight:700}
 .nc{color:var(--t3);font-style:italic}
@@ -274,14 +277,20 @@ tbody tr:hover td{background:#f5f5f3}
         </div>
         <p class="hint" style="margin-bottom:10px">· 실거래건수·실거래가격·전세월세 기간을 비워두면 기존 방식(건수: 최근 12개월 / 가격·전세월세: 위 기준 범위)대로 계산됩니다. 호가·KB시세 기간을 비워두면 기존처럼 가장 최신 입력월(당월) 값 하나만 씁니다 — 채우면 그 기간 평균으로 계산됩니다. 전세·월세, 호가·KB시세는 각각 하나의 기간을 함께 씁니다. 입력 형식: 2026.02 (연.월)</p>
         <div class="f" style="margin-top:4px"><label>내보낼 항목</label>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;padding:10px;border:1px solid var(--bdr);border-radius:var(--r);background:var(--bg2)">
-            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;padding:6px 10px;border:1px solid var(--bdr);border-radius:var(--r);background:var(--bg)"><input type="checkbox" id="exp-sel-trade" checked>실거래가 (매매가·평당가)</label>
-            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;padding:6px 10px;border:1px solid var(--bdr);border-radius:var(--r);background:var(--bg)"><input type="checkbox" id="exp-sel-ask" checked>시세 (호가·평당가)</label>
-            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;padding:6px 10px;border:1px solid var(--bdr);border-radius:var(--r);background:var(--bg)"><input type="checkbox" id="exp-sel-kb" checked>KB시세 (시세·평당가)</label>
-            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;padding:6px 10px;border:1px solid var(--bdr);border-radius:var(--r);background:var(--bg)"><input type="checkbox" id="exp-sel-jeonse" checked>전세<span style="color:var(--t3);font-size:11px">(오피스텔)</span></label>
-            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;padding:6px 10px;border:1px solid var(--bdr);border-radius:var(--r);background:var(--bg)"><input type="checkbox" id="exp-sel-wolse" checked>월세<span style="color:var(--t3);font-size:11px">(오피스텔)</span></label>
-            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;padding:6px 10px;border:1px solid var(--bdr);border-radius:var(--r);background:var(--bg)"><input type="checkbox" id="exp-sel-yield" checked>임대수익률<span style="color:var(--t3);font-size:11px">(오피스텔, 월세 함께 선택 필요)</span></label>
+          <div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center;padding:8px;border:1px solid var(--bdr);border-radius:var(--r);background:var(--bg2)">
+            <label class="chk-item"><input type="checkbox" id="exp-sel-trade" checked>실거래가</label>
+            <span class="chk-div"></span>
+            <label class="chk-item"><input type="checkbox" id="exp-sel-ask">호가</label>
+            <label class="chk-item"><input type="checkbox" id="exp-sel-ask-py" checked>호가 평당가</label>
+            <span class="chk-div"></span>
+            <label class="chk-item"><input type="checkbox" id="exp-sel-kb">KB시세</label>
+            <label class="chk-item"><input type="checkbox" id="exp-sel-kb-py" checked>KB시세 평당가</label>
+            <span class="chk-div"></span>
+            <label class="chk-item" title="오피스텔 전용"><input type="checkbox" id="exp-sel-jeonse" checked>전세</label>
+            <label class="chk-item" title="오피스텔 전용"><input type="checkbox" id="exp-sel-wolse" checked>월세</label>
+            <label class="chk-item" title="오피스텔 전용 · 월세도 함께 선택해야 계산됩니다"><input type="checkbox" id="exp-sel-yield" checked>임대수익률</label>
           </div>
+          <p class="hint">· 기본값은 실거래가(매매가·평당가)와 호가·KB시세의 평당가만 포함합니다(기존 "당월(평당)" 방식). 호가·KB시세 원값이 필요하면 위에서 직접 체크하세요. 전세·월세·임대수익률은 오피스텔 단지에만 적용되고, 임대수익률은 월세도 함께 선택해야 계산됩니다.</p>
         </div>
       </div>
     </details>
@@ -1038,25 +1047,30 @@ function handleNaverPaste(cid){
   const text=ta?ta.value:'';
   const listings=parseNaverListings(text);
   if(!listings.length){showMsg('msg-naver','인식된 매물이 없습니다. 붙여넣은 텍스트를 확인해 주세요.','me');return;}
+  // 자동 채움은 매물 전체의 타입별 평균가로 계산한다 (직접 입력할 때만 최저·최고를 각각
+  // 입력). 개별 매물 자체가 "4억4천~4억5천"처럼 범위면 그 매물의 대표가로 중간값을 쓰고,
+  // 같은 타입의 모든 매물 대표가를 평균 낸 값을 최저·최고 칸에 동일하게 채운다
+  // (askAvg=(lo+hi)/2 계산 로직과 맞물려 이 평균값이 그대로 호가 평균으로 쓰이게 된다).
   const byType={};
   let unmatched=0;
   listings.forEach(function(r){
     const t=matchNaverType(cx,r.typeCode,r.area);
     if(!t){unmatched++;return;}
     // 네이버 표시 가격(만원)을 프로그램 내부 단위(천원)에 맞춰 ×10
-    const lo=r.lo*10,hi=r.hi*10;
-    if(!byType[t.typeName])byType[t.typeName]={lo:Infinity,hi:-Infinity,cnt:0};
+    const price=((r.lo+r.hi)/2)*10;
+    if(!byType[t.typeName])byType[t.typeName]={sum:0,cnt:0};
     const b=byType[t.typeName];
-    b.lo=Math.min(b.lo,lo);b.hi=Math.max(b.hi,hi);b.cnt++;
+    b.sum+=price;b.cnt++;
   });
   let filled=0;
   Object.keys(byType).forEach(function(tn){
     const b=byType[tn];
+    const avg=Math.round(b.sum/b.cnt);
     const loEl=document.getElementById('al-'+encodeURIComponent(tn));
     const hiEl=document.getElementById('ah-'+encodeURIComponent(tn));
     const cntEl=document.getElementById('acnt-'+encodeURIComponent(tn));
-    if(loEl){loEl.value=b.lo;filled++;}
-    if(hiEl)hiEl.value=b.hi;
+    if(loEl){loEl.value=avg;filled++;}
+    if(hiEl)hiEl.value=avg;
     if(cntEl)cntEl.value=b.cnt;
   });
   showMsg('msg-naver',listings.length+'건 인식 · '+filled+'개 타입에 자동 채움'+(unmatched?' · 미매칭 '+unmatched+'건':'')+' — 저장 전까지 직접 수정 가능합니다.','ms');
@@ -2769,14 +2783,17 @@ function _exportExcelRun(){
     customAskKbMonths=buildMonthRange(askKbFrom,askKbTo);
     if(!customAskKbMonths){showMsg('msg-exp','호가·KB시세 기간 형식이 올바르지 않습니다. (예: 2026.02~2026.07)','me');return;}
   }
-  // 내보낼 항목 선택 — 전세/월세/임대수익률은 오피스텔 단지에만 적용된다.
+  // 내보낼 항목 선택 — 호가/KB시세는 원값·평당가를 각각 독립적으로 선택할 수 있다.
+  // 전세/월세/임대수익률은 오피스텔 단지에만 적용된다.
   const selTrade=document.getElementById('exp-sel-trade').checked;
   const selAsk=document.getElementById('exp-sel-ask').checked;
+  const selAskPy=document.getElementById('exp-sel-ask-py').checked;
   const selKb=document.getElementById('exp-sel-kb').checked;
+  const selKbPy=document.getElementById('exp-sel-kb-py').checked;
   const selJeonse=document.getElementById('exp-sel-jeonse').checked;
   const selWolse=document.getElementById('exp-sel-wolse').checked;
   const selYield=document.getElementById('exp-sel-yield').checked;
-  if(!selTrade&&!selAsk&&!selKb&&!selJeonse&&!selWolse&&!selYield){showMsg('msg-exp','내보낼 항목을 하나 이상 선택해 주세요.','me');return;}
+  if(!selTrade&&!selAsk&&!selAskPy&&!selKb&&!selKbPy&&!selJeonse&&!selWolse&&!selYield){showMsg('msg-exp','내보낼 항목을 하나 이상 선택해 주세요.','me');return;}
   // 임대수익률은 환산보증금·환산월세 컬럼(수식이 참조하는 셀)이 있어야 계산할 수 있으므로 월세도 함께 선택되어야 한다.
   if(selYield&&!selWolse){showMsg('msg-exp','임대수익률을 내보내려면 월세도 함께 선택해 주세요.','me');return;}
   const ids=[...document.querySelectorAll('.exp-chk:checked')].map(e=>e.value);
@@ -2965,12 +2982,23 @@ function _exportExcelRun(){
     const wantJeonse=sheetOft&&selJeonse;
     const wantWolse=sheetOft&&selWolse;
     const wantYield=sheetOft&&selYield; // selYield면 selWolse도 참(위에서 검증)이므로 wantWolse도 항상 true
-    // modules: 이 시트에 실제로 표시할 열 그룹을 순서대로 정의. 각 그룹은 항상 2개 열(원값+평당가,
-    // 또는 환산보증금+환산월세, 또는 대출X+대출50%)을 차지한다.
+    // modules: 이 시트에 실제로 표시할 열 그룹을 순서대로 정의. 실거래가·전세·월세·임대수익률은
+    // 항상 2개 열(원값+평당가, 또는 환산보증금+환산월세, 또는 대출X+대출50%)을 함께 내보내지만,
+    // 호가·KB시세는 원값·평당가를 독립적으로 선택할 수 있어 열이 0~2개로 달라진다.
     const modules=[];
     if(selTrade)modules.push({key:'trade',label:'실거래가',subs:['매매가','평당가']});
-    if(selAsk)modules.push({key:'ask',label:'시세',subs:['호가','평당가']});
-    if(selKb)modules.push({key:'kb',label:'KB시세',subs:['시세','평당가']});
+    {
+      const askSubs=[];
+      if(selAsk)askSubs.push('호가');
+      if(selAskPy)askSubs.push('평당가');
+      if(askSubs.length)modules.push({key:'ask',label:'시세',subs:askSubs,hasAvg:selAsk,hasPy:selAskPy});
+    }
+    {
+      const kbSubs=[];
+      if(selKb)kbSubs.push('시세');
+      if(selKbPy)kbSubs.push('평당가');
+      if(kbSubs.length)modules.push({key:'kb',label:'KB시세',subs:kbSubs,hasAvg:selKb,hasPy:selKbPy});
+    }
     if(wantJeonse)modules.push({key:'jeonse',label:'전세',subs:['평균','평당가']});
     if(wantWolse)modules.push({key:'wolse',label:'월세',subs:['환산보증금','환산월세']});
     if(wantYield)modules.push({key:'yield',label:'임대수익률',subs:['대출 X','대출 50%']});
@@ -2979,13 +3007,18 @@ function _exportExcelRun(){
     {
       let c=4;
       modules.forEach(mod=>{
-        if(mod.key==='trade'){IDX.trAvg=c;IDX.trPy=c+1;}
-        else if(mod.key==='ask'){IDX.askAvg=c;IDX.askPy=c+1;}
-        else if(mod.key==='kb'){IDX.kbAvg=c;IDX.kbPy=c+1;}
-        else if(mod.key==='jeonse'){IDX.jsAvg=c;IDX.jsPy=c+1;}
-        else if(mod.key==='wolse'){IDX.stdDep=c;IDX.convRent=c+1;}
-        else if(mod.key==='yield'){IDX.y1=c;IDX.y2=c+1;}
-        c+=2;
+        if(mod.key==='trade'){IDX.trAvg=c;IDX.trPy=c+1;c+=2;}
+        else if(mod.key==='ask'){
+          if(mod.hasAvg){IDX.askAvg=c;c++;}
+          if(mod.hasPy){IDX.askPy=c;c++;}
+        }
+        else if(mod.key==='kb'){
+          if(mod.hasAvg){IDX.kbAvg=c;c++;}
+          if(mod.hasPy){IDX.kbPy=c;c++;}
+        }
+        else if(mod.key==='jeonse'){IDX.jsAvg=c;IDX.jsPy=c+1;c+=2;}
+        else if(mod.key==='wolse'){IDX.stdDep=c;IDX.convRent=c+1;c+=2;}
+        else if(mod.key==='yield'){IDX.y1=c;IDX.y2=c+1;c+=2;}
       });
       IDX.visibleCols=Math.max(c,4);
     }
@@ -3077,14 +3110,18 @@ function _exportExcelRun(){
         const h1=[H('구분(평형)'),HB(),HB(),H(unitWord+'수')];
         const h2=[H('타입'),H('전용(평)'),H(pyWord+'(평)'),H(unitWord+'수')];
         modules.forEach(mod=>{
-          h1.push(H(mod.label),HB());
-          h2.push(H(mod.subs[0]),H(mod.subs[1]));
+          h1.push(H(mod.label));
+          for(let i=1;i<mod.subs.length;i++)h1.push(HB());
+          mod.subs.forEach(function(s){h2.push(H(s));});
         });
         if(saleColIdx!=null){h1.push(HB());h2.push(H('매매가(수익률산정)'));}
         pushRow(h1);
         addMerge(R-1,0,R-1,2);
         let mc=4;
-        modules.forEach(()=>{addMerge(R-1,mc,R-1,mc+1);mc+=2;});
+        modules.forEach(mod=>{
+          if(mod.subs.length>1)addMerge(R-1,mc,R-1,mc+mod.subs.length-1);
+          mc+=mod.subs.length;
+        });
         pushRow(h2);
         addMerge(R-2,3,R-1,3);
       }
@@ -3111,15 +3148,21 @@ function _exportExcelRun(){
                 DF(_pyF(rowNum,IDX.trAvg,areaColIdx),r.ts&&r.pyBase?Math.round(r.ts.avg/r.pyBase):null)
               );
             } else if(mod.key==='ask'){
-              rowCells.push(
-                D(r.askAvg!=null?Math.round(r.askAvg):null),
-                DF(_pyF(rowNum,IDX.askAvg,areaColIdx),r.askAvg&&r.pyBase?Math.round(r.askAvg/r.pyBase):null)
-              );
+              // 원값 열이 함께 있으면 평당가를 그 열÷평형의 라이브 수식으로, 원값 열이 없으면
+              // (기본값: 평당가만 내보낼 때) 계산된 정적값으로 채운다.
+              if(IDX.askAvg!=null)rowCells.push(D(r.askAvg!=null?Math.round(r.askAvg):null));
+              if(IDX.askPy!=null){
+                rowCells.push(IDX.askAvg!=null
+                  ?DF(_pyF(rowNum,IDX.askAvg,areaColIdx),r.askAvg&&r.pyBase?Math.round(r.askAvg/r.pyBase):null)
+                  :D(r.askAvg&&r.pyBase?Math.round(r.askAvg/r.pyBase):null));
+              }
             } else if(mod.key==='kb'){
-              rowCells.push(
-                D(r.kb?.avg!=null?Math.round(r.kb.avg):null),
-                DF(_pyF(rowNum,IDX.kbAvg,areaColIdx),r.kb?.avg&&r.pyBase?Math.round(r.kb.avg/r.pyBase):null)
-              );
+              if(IDX.kbAvg!=null)rowCells.push(D(r.kb?.avg!=null?Math.round(r.kb.avg):null));
+              if(IDX.kbPy!=null){
+                rowCells.push(IDX.kbAvg!=null
+                  ?DF(_pyF(rowNum,IDX.kbAvg,areaColIdx),r.kb?.avg&&r.pyBase?Math.round(r.kb.avg/r.pyBase):null)
+                  :D(r.kb?.avg&&r.pyBase?Math.round(r.kb.avg/r.pyBase):null));
+              }
             } else if(mod.key==='jeonse'){
               rowCells.push(
                 D(r.yd.jsAvg?Math.round(r.yd.jsAvg):null),
@@ -3146,9 +3189,11 @@ function _exportExcelRun(){
             if(mod.key==='trade'){
               gRowCells.push(GF(_wf(IDX.trAvg,rowNums),ga.trAvg||null,gFill),GF(_wf(IDX.trPy,rowNums),ga.trPy||null,gFill));
             } else if(mod.key==='ask'){
-              gRowCells.push(GF(_wf(IDX.askAvg,rowNums),ga.askAvg||null,gFill),GF(_wf(IDX.askPy,rowNums),ga.askPy||null,gFill));
+              if(IDX.askAvg!=null)gRowCells.push(GF(_wf(IDX.askAvg,rowNums),ga.askAvg||null,gFill));
+              if(IDX.askPy!=null)gRowCells.push(GF(_wf(IDX.askPy,rowNums),ga.askPy||null,gFill));
             } else if(mod.key==='kb'){
-              gRowCells.push(GF(_wf(IDX.kbAvg,rowNums),ga.kbAvg||null,gFill),GF(_wf(IDX.kbPy,rowNums),ga.kbPy||null,gFill));
+              if(IDX.kbAvg!=null)gRowCells.push(GF(_wf(IDX.kbAvg,rowNums),ga.kbAvg||null,gFill));
+              if(IDX.kbPy!=null)gRowCells.push(GF(_wf(IDX.kbPy,rowNums),ga.kbPy||null,gFill));
             } else if(mod.key==='jeonse'){
               gRowCells.push(GF(_wf(IDX.jsAvg,rowNums),ga.jsAvg||null,gFill),GF(_wf(IDX.jsPy,rowNums),ga.jsPy||null,gFill));
             } else if(mod.key==='wolse'){
@@ -3173,9 +3218,11 @@ function _exportExcelRun(){
         if(mod.key==='trade'){
           aRowCells.push(AF(_wf(IDX.trAvg,allTypeRowNums),wTrAvg?Math.round(wTrAvg):null,aFill),AF(_wf(IDX.trPy,allTypeRowNums),wTrPy||null,aFill));
         } else if(mod.key==='ask'){
-          aRowCells.push(AF(_wf(IDX.askAvg,allTypeRowNums),wAskAvg?Math.round(wAskAvg):null,aFill),AF(_wf(IDX.askPy,allTypeRowNums),wAskPy||null,aFill));
+          if(IDX.askAvg!=null)aRowCells.push(AF(_wf(IDX.askAvg,allTypeRowNums),wAskAvg?Math.round(wAskAvg):null,aFill));
+          if(IDX.askPy!=null)aRowCells.push(AF(_wf(IDX.askPy,allTypeRowNums),wAskPy||null,aFill));
         } else if(mod.key==='kb'){
-          aRowCells.push(AF(_wf(IDX.kbAvg,allTypeRowNums),wKbAvg?Math.round(wKbAvg):null,aFill),AF(_wf(IDX.kbPy,allTypeRowNums),wKbPy||null,aFill));
+          if(IDX.kbAvg!=null)aRowCells.push(AF(_wf(IDX.kbAvg,allTypeRowNums),wKbAvg?Math.round(wKbAvg):null,aFill));
+          if(IDX.kbPy!=null)aRowCells.push(AF(_wf(IDX.kbPy,allTypeRowNums),wKbPy||null,aFill));
         } else if(mod.key==='jeonse'){
           const wJsAvg=wtdPrice(TR,r=>r.yd.jsAvg||0);
           const wJsPy=wtdPyPrice(TR,r=>r.yd.jsAvg||0);
