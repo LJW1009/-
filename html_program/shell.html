@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>법규 최신화 프로그램</title>
+<style>
+  :root {
+    --navy: #003366; --navy-dark: #002050; --bg: #f5f7fa; --card: #ffffff;
+    --border: #dde3ec; --text: #1f2937; --muted: #6b7280;
+    --ok: #16803c; --warn: #b45309; --err: #b91c1c;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Malgun Gothic", "Apple SD Gothic Neo", sans-serif; background: var(--bg); color: var(--text); }
+  header { background: var(--navy); color: #fff; padding: 18px 24px; }
+  header h1 { margin: 0; font-size: 20px; }
+  header p { margin: 4px 0 0; font-size: 13px; color: #cbd8ea; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 20px; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+  .tab-btn { padding: 10px 18px; border: 1px solid var(--border); background: #fff; border-radius: 8px 8px 0 0;
+             cursor: pointer; font-size: 14px; font-weight: 600; color: var(--muted); }
+  .tab-btn.active { background: var(--navy); color: #fff; border-color: var(--navy); }
+  .tab-panel { display: none; background: var(--card); border: 1px solid var(--border); border-radius: 0 8px 8px 8px; padding: 20px; }
+  .tab-panel.active { display: block; }
+  h2 { font-size: 16px; margin: 22px 0 10px; padding-bottom: 6px; border-bottom: 2px solid var(--navy); color: var(--navy); }
+  h2:first-child { margin-top: 0; }
+  .hint { color: var(--muted); font-size: 12.5px; margin: 4px 0 10px; }
+  label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 4px; color: #374151; }
+  input[type=text], input[type=file], textarea, select {
+    width: 100%; padding: 7px 9px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px;
+    font-family: inherit; margin-bottom: 10px; background: #fff; color: var(--text);
+  }
+  textarea { resize: vertical; }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .card { background: #fafbfc; border: 1px solid var(--border); border-radius: 8px; padding: 14px; margin-bottom: 14px; }
+  .card-title { font-weight: 700; margin-bottom: 8px; color: var(--navy); }
+  .subtitle { font-weight: 700; font-size: 13px; margin: 10px 0 6px; color: #374151; }
+  .rows-box { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
+  .row-item { display: grid; grid-template-columns: 90px 1fr 1fr 34px; gap: 8px; align-items: start; }
+  .row-item textarea { margin-bottom: 0; }
+  .list-item { display: flex; gap: 8px; align-items: start; margin-bottom: 8px; }
+  .list-item textarea { margin-bottom: 0; }
+  .table-row-item { display: grid; grid-template-columns: 1fr 1.6fr 1.6fr 34px; gap: 8px; margin-bottom: 8px; align-items: start; }
+  .table-row-item textarea { margin-bottom: 0; }
+  .card-row { display: grid; grid-template-columns: 110px 1fr 1fr 1fr 34px; gap: 8px; margin-bottom: 8px; align-items: center; }
+  .checkbox-label { display: flex; align-items: center; gap: 6px; font-weight: 600; margin-bottom: 8px; }
+  .checkbox-label input { width: auto; margin: 0; }
+  button { font-family: inherit; cursor: pointer; }
+  .btn-primary { background: var(--navy); color: #fff; border: none; border-radius: 6px; padding: 10px 18px; font-size: 14px; font-weight: 700; width: 100%; margin-top: 10px; }
+  .btn-primary:hover { background: var(--navy-dark); }
+  .btn-primary:disabled { background: #9ca3af; cursor: not-allowed; }
+  .btn-secondary { background: #eef2f7; border: 1px solid var(--border); border-radius: 6px; padding: 7px 14px; font-size: 13px; margin: 4px 0 10px; }
+  .btn-danger { background: #fff; border: 1px solid #f3c4c4; color: var(--err); border-radius: 6px; padding: 6px 12px; font-size: 12.5px; }
+  .btn-icon { background: #fff; border: 1px solid var(--border); border-radius: 6px; width: 34px; height: 34px; font-size: 14px; }
+  details.style-preview { border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; margin: 10px 0; background: #fafbfc; }
+  details.style-preview summary { cursor: pointer; font-weight: 600; font-size: 13px; }
+  .mini-table { border-collapse: collapse; width: 100%; margin-top: 8px; font-size: 12.5px; }
+  .mini-table th, .mini-table td { border: 1px solid var(--border); padding: 4px 8px; text-align: left; }
+  .mini-table th { background: #eef2f7; }
+  .verify-box { background: #f4f8ff; border: 1px solid #cdd9ec; border-radius: 8px; padding: 12px 14px; margin: 12px 0; font-size: 13px; }
+  .verify-box p { margin: 4px 0; }
+  .ok { color: var(--ok); font-weight: 700; }
+  .warn { color: var(--warn); font-weight: 700; }
+  .err { color: var(--err); font-weight: 700; }
+  #toast-box { position: fixed; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 8px; z-index: 999; }
+  .toast { background: #1f2937; color: #fff; padding: 10px 16px; border-radius: 8px; font-size: 13px; opacity: 0; transform: translateY(8px); transition: all .25s; max-width: 320px; }
+  .toast.show { opacity: 1; transform: translateY(0); }
+  .toast.ok { background: #14532d; }
+  .toast.err { background: #7f1d1d; }
+  footer { text-align: center; color: var(--muted); font-size: 12px; padding: 24px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>📜 법규 최신화 프로그램</h1>
+  <p>브라우저에서 바로 동작합니다 (Python·Node·서버 설치 불필요). 파일은 이 페이지 밖으로 전송되지 않습니다.</p>
+</header>
+
+<div class="wrap">
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="tab-excel">📗 법규 변경 보고사항 (Excel)</button>
+    <button class="tab-btn" data-tab="tab-ppt">📙 보도자료 요약 PPT (3장 고정)</button>
+  </div>
+
+  <!-- ============ EXCEL TAB ============ -->
+  <div id="tab-excel" class="tab-panel active">
+    <h2>원본 업로드</h2>
+    <label>원본 통합 보고서.xlsx</label>
+    <input type="file" id="xlsx-file" accept=".xlsx">
+    <p id="xlsx-status" class="hint"></p>
+
+    <div id="excel-form" hidden>
+      <details class="style-preview">
+        <summary>🔍 이 파일에서 방금 추출한 서식(styles.xml) 미리보기</summary>
+        <div id="style-preview"></div>
+      </details>
+
+      <h2>작업 종류</h2>
+      <label><input type="radio" name="mode" value="new" checked> 🆕 신규 월 탭 생성</label>
+      <label><input type="radio" name="mode" value="append"> ➕ 기존 탭에 법령 추가</label>
+
+      <div id="new-month-fields">
+        <div class="row2">
+          <label>대상 연월 (YYYY-MM)<input type="text" id="year-month" placeholder="2026-09"></label>
+          <label>관련 부서<input type="text" id="department" value="영업계획팀"></label>
+        </div>
+        <label class="checkbox-label"><input type="checkbox" id="no-changes-chk"> 이번 달 법규 변경사항 없음</label>
+      </div>
+
+      <div id="append-fields" hidden>
+        <label>법령을 추가할 기존 월 탭<select id="target-sheet-select"></select></label>
+      </div>
+
+      <h2>법령 목록</h2>
+      <div id="laws-container"></div>
+      <button class="btn-secondary" id="add-law-btn" type="button">➕ 법령 추가</button>
+
+      <button class="btn-primary" id="gen-excel-btn" type="button">🚀 엑셀 생성</button>
+      <div id="excel-result"></div>
+    </div>
+  </div>
+
+  <!-- ============ PPT TAB ============ -->
+  <div id="tab-ppt" class="tab-panel">
+    <p class="hint">텍스트에 <code>[[강조]]</code>는 파랑, <code>{{강조}}</code>는 파랑+노랑 형광으로 렌더링됩니다.</p>
+
+    <h2>표지</h2>
+    <div class="row2">
+      <label>제목<input type="text" id="ppt-title" placeholder="예: 주택 신속공급 방안 & 금융 종합대책"></label>
+      <label>출처<input type="text" id="ppt-source" placeholder="예: 국토교통부 보도(26.09.01)"></label>
+    </div>
+    <div class="row2">
+      <label>연월<input type="text" id="ppt-yearmonth" placeholder="2026. 09"></label>
+      <label>팀<input type="text" id="ppt-team" value="영업부"></label>
+    </div>
+
+    <h2>1. 내용요약</h2>
+    <div id="summary-items"></div>
+    <button class="btn-secondary" id="add-summary-item" type="button">➕ 요약 항목 추가 (최대 5)</button>
+
+    <h2>2. 변경사항 (표)</h2>
+    <div class="row2" style="grid-template-columns:1fr 1fr 1fr;">
+      <label>열1<input type="text" id="chg-col-a" value="구  분"></label>
+      <label>열2<input type="text" id="chg-col-b" value="종  전"></label>
+      <label>열3<input type="text" id="chg-col-c" value="개  정"></label>
+    </div>
+    <div id="changes-rows"></div>
+    <button class="btn-secondary" id="add-changes-row" type="button">➕ 행 추가</button>
+
+    <h2>3. 관련 정책 흐름 (표)</h2>
+    <div id="timeline-rows"></div>
+    <button class="btn-secondary" id="add-timeline-row" type="button">➕ 행 추가</button>
+
+    <h2>4. 종합정리 (인포그래픽, 선택)</h2>
+    <label class="checkbox-label"><input type="checkbox" id="use-infographic"> 인포그래픽 포함</label>
+    <div id="infographic-fields" hidden>
+      <div class="row2">
+        <div>
+          <div class="subtitle">종전</div>
+          <label>라벨<input type="text" id="info-before-label" value="종  전"></label>
+          <label>값<input type="text" id="info-before-value"></label>
+          <label>캡션(선택)<input type="text" id="info-before-caption"></label>
+        </div>
+        <div>
+          <div class="subtitle">변경</div>
+          <label>라벨<input type="text" id="info-after-label" value="변  경"></label>
+          <label>값<input type="text" id="info-after-value"></label>
+          <label>캡션(선택)<input type="text" id="info-after-caption"></label>
+        </div>
+      </div>
+      <div class="subtitle">카드</div>
+      <div id="info-cards"></div>
+      <button class="btn-secondary" id="add-card-btn" type="button">➕ 카드 추가 (최대 5)</button>
+    </div>
+
+    <h2>의견 바 (하단)</h2>
+    <div id="opinion-lines"></div>
+    <button class="btn-secondary" id="add-opinion" type="button">➕ 의견 추가 (최대 3)</button>
+
+    <button class="btn-primary" id="gen-ppt-btn" type="button">🚀 PPT 생성</button>
+    <div id="ppt-result"></div>
+  </div>
+</div>
+
+<footer>실제 원본 파일을 다루므로, 생성 후에도 결과 파일을 열어 눈으로 한 번 더 확인하세요.</footer>
+<div id="toast-box"></div>
+
+<script>/*__PPTXGEN_BUNDLE__*/</script>
+<script>/*__ASSETS__*/</script>
+<script>/*__APP_JS__*/</script>
+<script>/*__PPT_JS__*/</script>
+<script>/*__UI_JS__*/</script>
+</body>
+</html>
