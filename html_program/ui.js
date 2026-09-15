@@ -170,6 +170,29 @@ function renderLaws() {
     addRowBtn.addEventListener("click", () => { law.rows.push({ kind: "same", before: "", after: "" }); renderLaws(); });
     card.appendChild(addRowBtn);
 
+    const bulkDetails = el("details", { class: "style-preview" }, []);
+    bulkDetails.appendChild(el("summary", { text: "🪄 빠른 입력: 신구조문대비표 붙여넣기 (변경전/변경후 줄 단위 자동 매칭)" }));
+    bulkDetails.appendChild(el("p", { class: "hint", text: "법제처 신구조문대비표에서 변경전·변경후를 각각 복사해 붙여넣으면, 줄 단위로 짝지어 조문 행을 자동 생성합니다. \"제N조\" 로 시작하는 줄은 head, 두 줄이 완전히 같으면 same, 그 외엔 change로 분류합니다 — 생성 후 꼭 확인하세요." }));
+    const bulkRow = el("div", { class: "row2" }, []);
+    const bulkBefore = el("textarea", { rows: "6", placeholder: "변경전 전체를 여기 붙여넣기 (줄바꿈 유지)" }, []);
+    const bulkAfter = el("textarea", { rows: "6", placeholder: "변경후 전체를 여기 붙여넣기 (줄바꿈 유지, 변경전과 줄 수를 맞춰주세요)" }, []);
+    bulkRow.appendChild(el("label", {}, [document.createTextNode("변경전"), bulkBefore]));
+    bulkRow.appendChild(el("label", {}, [document.createTextNode("변경후"), bulkAfter]));
+    bulkDetails.appendChild(bulkRow);
+    const bulkBtn = el("button", { class: "btn-secondary", type: "button", text: "🪄 이 내용으로 조문 행 자동 생성" }, []);
+    bulkBtn.addEventListener("click", () => {
+      const result = bulkParseRows(bulkBefore.value, bulkAfter.value);
+      if (result.rows.length === 0) { toast("붙여넣은 내용이 없습니다.", "err"); return; }
+      law.rows.push(...result.rows);
+      toast(
+        result.warning ? `${result.rows.length}행 생성됨 — ${result.warning}` : `${result.rows.length}행 생성됨. 아래에서 kind·내용을 확인하세요.`,
+        result.warning ? "" : "ok"
+      );
+      renderLaws();
+    });
+    bulkDetails.appendChild(bulkBtn);
+    card.appendChild(bulkDetails);
+
     const delLawBtn = el("button", { class: "btn-danger", type: "button", text: "🗑 이 법령 삭제" }, []);
     delLawBtn.addEventListener("click", () => { state.excel.laws.splice(li, 1); renderLaws(); });
     card.appendChild(delLawBtn);

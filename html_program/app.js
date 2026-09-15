@@ -87,6 +87,43 @@ function xRow(idx, height, cells) {
   return `<row r="${idx}" ht="${height}" customHeight="1">${cells.join("")}</row>`;
 }
 
+/**
+ * 법제처 신구조문대비표에서 복사한 "변경전"/"변경후" 원문(줄바꿈 유지)을
+ * 줄 단위로 짝지어 rows[]로 변환한다.
+ *   - "제N조" 로 시작하는 줄 → head (조문 표제, 내용이 바뀌었어도 head)
+ *   - 두 줄이 공백 정리 후 완전히 같음 → same
+ *   - 그 외 → change
+ * 줄 수가 다르면 짧은 쪽을 빈 줄로 채우고 경고를 함께 반환한다.
+ * 완전 자동화가 아니라 초안 생성이므로, 결과는 반드시 사람이 확인해야 한다.
+ */
+function bulkParseRows(beforeText, afterText) {
+  const normalize = (s) => s.replace(/\s+/g, " ").trim();
+  const beforeLines = String(beforeText).split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
+  const afterLines = String(afterText).split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
+  const n = Math.max(beforeLines.length, afterLines.length);
+  let warning = null;
+  if (beforeLines.length !== afterLines.length) {
+    warning = `변경전 ${beforeLines.length}줄 / 변경후 ${afterLines.length}줄로 줄 수가 달라 부족한 쪽은 빈 줄로 채웠습니다 — kind·짝을 꼭 확인하세요.`;
+  }
+  const HEAD_RE = /^제\s*\d+\s*조/;
+  // "(생 략)" ↔ "(현행과 같음)"·"(좌동)" 은 문구는 다르지만 "변경 없음"을 뜻하는
+  // 법제처 신구조문대비표의 관용 표기 — 텍스트가 달라도 same으로 분류한다.
+  const OMITTED_RE = /\(\s*생\s*략\s*\)/;
+  const UNCHANGED_RE = /\(\s*현행\s*과?\s*같음\s*\)|\(\s*좌\s*동\s*\)/;
+  const rows = [];
+  for (let i = 0; i < n; i++) {
+    const before = beforeLines[i] || "";
+    const after = afterLines[i] || "";
+    let kind;
+    if (HEAD_RE.test(before) || HEAD_RE.test(after)) kind = "head";
+    else if (normalize(before) === normalize(after)) kind = "same";
+    else if (OMITTED_RE.test(before) && UNCHANGED_RE.test(after)) kind = "same";
+    else kind = "change";
+    rows.push({ kind, before, after });
+  }
+  return { rows, warning };
+}
+
 async function listSheets(zip) {
   const wbXml = await readZipText(zip, "xl/workbook.xml");
   const doc = parseXml(wbXml);

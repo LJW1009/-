@@ -356,6 +356,43 @@ function xRow(idx, height, cells) {
   return `<row r="${idx}" ht="${height}" customHeight="1">${cells.join("")}</row>`;
 }
 
+/**
+ * 법제처 신구조문대비표에서 복사한 "변경전"/"변경후" 원문(줄바꿈 유지)을
+ * 줄 단위로 짝지어 rows[]로 변환한다.
+ *   - "제N조" 로 시작하는 줄 → head (조문 표제, 내용이 바뀌었어도 head)
+ *   - 두 줄이 공백 정리 후 완전히 같음 → same
+ *   - 그 외 → change
+ * 줄 수가 다르면 짧은 쪽을 빈 줄로 채우고 경고를 함께 반환한다.
+ * 완전 자동화가 아니라 초안 생성이므로, 결과는 반드시 사람이 확인해야 한다.
+ */
+function bulkParseRows(beforeText, afterText) {
+  const normalize = (s) => s.replace(/\s+/g, " ").trim();
+  const beforeLines = String(beforeText).split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
+  const afterLines = String(afterText).split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
+  const n = Math.max(beforeLines.length, afterLines.length);
+  let warning = null;
+  if (beforeLines.length !== afterLines.length) {
+    warning = `변경전 ${beforeLines.length}줄 / 변경후 ${afterLines.length}줄로 줄 수가 달라 부족한 쪽은 빈 줄로 채웠습니다 — kind·짝을 꼭 확인하세요.`;
+  }
+  const HEAD_RE = /^제\s*\d+\s*조/;
+  // "(생 략)" ↔ "(현행과 같음)"·"(좌동)" 은 문구는 다르지만 "변경 없음"을 뜻하는
+  // 법제처 신구조문대비표의 관용 표기 — 텍스트가 달라도 same으로 분류한다.
+  const OMITTED_RE = /\(\s*생\s*략\s*\)/;
+  const UNCHANGED_RE = /\(\s*현행\s*과?\s*같음\s*\)|\(\s*좌\s*동\s*\)/;
+  const rows = [];
+  for (let i = 0; i < n; i++) {
+    const before = beforeLines[i] || "";
+    const after = afterLines[i] || "";
+    let kind;
+    if (HEAD_RE.test(before) || HEAD_RE.test(after)) kind = "head";
+    else if (normalize(before) === normalize(after)) kind = "same";
+    else if (OMITTED_RE.test(before) && UNCHANGED_RE.test(after)) kind = "same";
+    else kind = "change";
+    rows.push({ kind, before, after });
+  }
+  return { rows, warning };
+}
+
 async function listSheets(zip) {
   const wbXml = await readZipText(zip, "xl/workbook.xml");
   const doc = parseXml(wbXml);
@@ -1059,25 +1096,18 @@ function buildPressPpt(spec) {
    ============================================================ */
 "use strict";
 
-const RPT_T = {
-  W: 10.8333, H: 7.5,
-  FONT: "나눔바른고딕",
-  NAVY: "003366", TBL_HEAD: "002060",
-  BOX: "FFFFCC", BAR: "FFFF99",
-  BLUE: "0000FF", MARK: "FFFF00",
-  TEXT: "1F1F1F", LINE: "BFBFBF",
-};
+/* PPT_T (색상·폰트 토큰)는 ppt.js에서 공용으로 정의됨 */
 const RPT_M = { x: 0.14, w: 10.472, top: 0.157, headH: 0.337, gap: 0.22 };
 
 function buildReportPpt(spec) {
   const pres = new PptxGenJS();
-  pres.defineLayout({ name: "DETRE", width: RPT_T.W, height: RPT_T.H });
+  pres.defineLayout({ name: "DETRE", width: PPT_T.W, height: PPT_T.H });
   pres.layout = "DETRE";
   pres.author = "영업계획팀";
   pres.title = spec.meta.title;
 
   function heading(slide, text, y) {
-    slide.addText(text, { x: RPT_M.x, y: y, w: RPT_M.w, h: RPT_M.headH, fontFace: RPT_T.FONT, fontSize: 14, bold: true, color: RPT_T.TEXT, margin: 0, valign: "middle" });
+    slide.addText(text, { x: RPT_M.x, y: y, w: RPT_M.w, h: RPT_M.headH, fontFace: PPT_T.FONT, fontSize: 14, bold: true, color: PPT_T.TEXT, margin: 0, valign: "middle" });
     return y + RPT_M.headH + 0.08;
   }
 
@@ -1085,19 +1115,19 @@ function buildReportPpt(spec) {
     slide.background = { color: "FFFFFF" };
     slide.addText(spec.meta.title, {
       shape: pres.ShapeType.roundRect, rectRadius: 0.174, x: 0.601, y: 0.857, w: 9.63, h: 1.043,
-      fill: { color: RPT_T.NAVY }, line: { color: "FFFFFF", width: 3 },
+      fill: { color: PPT_T.NAVY }, line: { color: "FFFFFF", width: 3 },
       shadow: { type: "outer", color: "808080", opacity: 0.5, blur: 8, offset: 3, angle: 45 },
-      fontFace: RPT_T.FONT, fontSize: 20, bold: true, color: "FFFFFF", align: "center", valign: "middle",
+      fontFace: PPT_T.FONT, fontSize: 20, bold: true, color: "FFFFFF", align: "center", valign: "middle",
     });
     if (spec.meta.subtitle) {
-      slide.addText(spec.meta.subtitle, { x: 0.601, y: 1.94, w: 9.63, h: 0.32, fontFace: RPT_T.FONT, fontSize: 12, bold: true, color: "595959", align: "center", valign: "middle", margin: 0 });
+      slide.addText(spec.meta.subtitle, { x: 0.601, y: 1.94, w: 9.63, h: 0.32, fontFace: PPT_T.FONT, fontSize: 12, bold: true, color: "595959", align: "center", valign: "middle", margin: 0 });
     }
     if (LOGO_DATA) slide.addImage({ data: LOGO_DATA, x: 3.766, y: 2.44, w: 3.299, h: 2.941 });
     slide.addText(
       [{ text: spec.meta.yearMonth, options: { breakLine: true } }, { text: spec.meta.team, options: {} }],
-      { x: 2.964, y: 5.7, w: 4.497, h: 1.043, fontFace: RPT_T.FONT, fontSize: 28, bold: true, color: RPT_T.TEXT, align: "center", valign: "top" }
+      { x: 2.964, y: 5.7, w: 4.497, h: 1.043, fontFace: PPT_T.FONT, fontSize: 28, bold: true, color: PPT_T.TEXT, align: "center", valign: "top" }
     );
-    slide.addText(spec.meta.source, { x: 0, y: 7.087, w: 8.6, h: 0.3, fontFace: RPT_T.FONT, fontSize: 12, bold: true, color: RPT_T.TEXT, valign: "middle" });
+    slide.addText(spec.meta.source, { x: 0, y: 7.087, w: 8.6, h: 0.3, fontFace: PPT_T.FONT, fontSize: 12, bold: true, color: PPT_T.TEXT, valign: "middle" });
   }
 
   function renderBox(slide, b, y) {
@@ -1106,7 +1136,7 @@ function buildReportPpt(spec) {
     const PT = b.fontSize || 11, LH = (PT * 1.5) / 72;
     const n = b.items.reduce((a, t) => a + pptEstLines("➊ " + t, RPT_M.w, PT, 0.26), 0);
     const h = n * LH + 0.3;
-    slide.addShape(pres.ShapeType.rect, { x: RPT_M.x - 0.067, y: y, w: RPT_M.w, h: h, fill: { color: RPT_T.BOX }, line: { color: RPT_T.BOX, width: 0.5 } });
+    slide.addShape(pres.ShapeType.rect, { x: RPT_M.x - 0.067, y: y, w: RPT_M.w, h: h, fill: { color: PPT_T.BOX }, line: { color: PPT_T.BOX, width: 0.5 } });
     const body = [];
     b.items.forEach((t, i) => {
       body.push({ text: (MARKS[i] || "▪") + " ", options: {} });
@@ -1114,15 +1144,15 @@ function buildReportPpt(spec) {
       if (i !== b.items.length - 1) r[r.length - 1].options.breakLine = true;
       body.push.apply(body, r);
     });
-    slide.addText(body, { x: RPT_M.x, y: y - 0.106, w: RPT_M.w, h: h + 0.135, fontFace: RPT_T.FONT, fontSize: PT, bold: true, color: RPT_T.TEXT, lineSpacingMultiple: 1.5, valign: "top", margin: [8, 8, 2, 2] });
+    slide.addText(body, { x: RPT_M.x, y: y - 0.106, w: RPT_M.w, h: h + 0.135, fontFace: PPT_T.FONT, fontSize: PT, bold: true, color: PPT_T.TEXT, lineSpacingMultiple: 1.5, valign: "top", margin: [8, 8, 2, 2] });
     return y + h + RPT_M.gap;
   }
 
   function renderTable(slide, b, y, bottomLimit) {
     if (b.heading) y = heading(slide, b.heading, y);
     const cw = b.colWidths || Array(b.columns.length).fill(RPT_M.w / b.columns.length);
-    const head = b.columns.map((c) => ({ text: c, options: { fill: { color: RPT_T.TBL_HEAD }, color: "FFFFFF", bold: true, align: "center", valign: "middle" } }));
-    const body = b.rows.map((r) => r.map((cell, ci) => ({ text: pptRuns(cell, { bold: true, color: RPT_T.TEXT }), options: { align: ci === 0 ? "center" : "left", valign: "middle" } })));
+    const head = b.columns.map((c) => ({ text: c, options: { fill: { color: PPT_T.TBL_HEAD }, color: "FFFFFF", bold: true, align: "center", valign: "middle" } }));
+    const body = b.rows.map((r) => r.map((cell, ci) => ({ text: pptRuns(cell, { bold: true, color: PPT_T.TEXT }), options: { align: ci === 0 ? "center" : "left", valign: "middle" } })));
     const avail = bottomLimit - y - 0.1;
     let pt = b.fontSize || 10, rowHs, need;
     for (;;) {
@@ -1140,7 +1170,7 @@ function buildReportPpt(spec) {
       rowHs = rowHs.map((h) => h + extra);
       need += extra * b.rows.length;
     }
-    slide.addTable([head].concat(body), { x: RPT_M.x, y: y, w: RPT_M.w, colW: cw, rowH: [0.26].concat(rowHs), border: { type: "solid", color: RPT_T.LINE, pt: 0.75 }, fontFace: RPT_T.FONT, fontSize: pt, margin: [2, 7, 2, 7], autoPage: false });
+    slide.addTable([head].concat(body), { x: RPT_M.x, y: y, w: RPT_M.w, colW: cw, rowH: [0.26].concat(rowHs), border: { type: "solid", color: PPT_T.LINE, pt: 0.75 }, fontFace: PPT_T.FONT, fontSize: pt, margin: [2, 7, 2, 7], autoPage: false });
     return y + need + RPT_M.gap;
   }
 
@@ -1152,13 +1182,13 @@ function buildReportPpt(spec) {
     const gap = cards.length ? 0.13 : 0;
     const upperH = avail - lowerH - gap;
     const AW = 0.62, CW = (RPT_M.w - AW - 0.24) / 2;
-    [{ d: b.before, x: RPT_M.x, fill: "F0F0F0", fg: RPT_T.TEXT, sub: "595959" }, { d: b.after, x: RPT_M.x + CW + AW + 0.24, fill: "1F3864", fg: "FFFFFF", sub: "D6DCE8" }].forEach((s) => {
+    [{ d: b.before, x: RPT_M.x, fill: "F0F0F0", fg: PPT_T.TEXT, sub: "595959" }, { d: b.after, x: RPT_M.x + CW + AW + 0.24, fill: "1F3864", fg: "FFFFFF", sub: "D6DCE8" }].forEach((s) => {
       if (!s.d) return;
       slide.addShape(pres.ShapeType.roundRect, { x: s.x, y: y, w: CW, h: upperH, rectRadius: 0.1, fill: { color: s.fill }, line: { color: s.fill, width: 0.5 } });
-      slide.addText(s.d.label, { x: s.x, y: y + 0.07, w: CW, h: 0.3, fontFace: RPT_T.FONT, fontSize: 13, bold: true, color: s.fg, align: "center", valign: "middle", margin: 0 });
-      slide.addText(s.d.value, { x: s.x, y: y + 0.36, w: CW, h: Math.max(0.36, upperH - 0.92), fontFace: RPT_T.FONT, fontSize: s.d.valueSize || 19, bold: true, color: s.fg, align: "center", valign: "middle", margin: 0 });
-      if (s.d.caption) slide.addText(s.d.caption, { x: s.x, y: y + upperH - 0.54, w: CW, h: 0.24, fontFace: RPT_T.FONT, fontSize: 10, bold: true, color: s.sub, align: "center", valign: "middle", margin: 0 });
-      if (s.d.note) slide.addText(s.d.note, { x: s.x, y: y + upperH - 0.31, w: CW, h: 0.24, fontFace: RPT_T.FONT, fontSize: 10, bold: true, color: s.sub, align: "center", valign: "middle", margin: 0 });
+      slide.addText(s.d.label, { x: s.x, y: y + 0.07, w: CW, h: 0.3, fontFace: PPT_T.FONT, fontSize: 13, bold: true, color: s.fg, align: "center", valign: "middle", margin: 0 });
+      slide.addText(s.d.value, { x: s.x, y: y + 0.36, w: CW, h: Math.max(0.36, upperH - 0.92), fontFace: PPT_T.FONT, fontSize: s.d.valueSize || 19, bold: true, color: s.fg, align: "center", valign: "middle", margin: 0 });
+      if (s.d.caption) slide.addText(s.d.caption, { x: s.x, y: y + upperH - 0.54, w: CW, h: 0.24, fontFace: PPT_T.FONT, fontSize: 10, bold: true, color: s.sub, align: "center", valign: "middle", margin: 0 });
+      if (s.d.note) slide.addText(s.d.note, { x: s.x, y: y + upperH - 0.31, w: CW, h: 0.24, fontFace: PPT_T.FONT, fontSize: 10, bold: true, color: s.sub, align: "center", valign: "middle", margin: 0 });
     });
     if (b.before && b.after) {
       slide.addShape(pres.ShapeType.rightArrow, { x: RPT_M.x + CW + 0.12, y: y + upperH / 2 - 0.15, w: AW, h: 0.3, fill: { color: "1F3864" }, line: { color: "1F3864", width: 0.5 } });
@@ -1171,8 +1201,8 @@ function buildReportPpt(spec) {
         const cx = RPT_M.x + colW * i;
         const data = ICONS[c.icon || "check"];
         if (data) slide.addImage({ data: data, x: cx + colW / 2 - 0.19, y: ly + 0.11, w: 0.38, h: 0.38 });
-        slide.addText(c.title, { x: cx, y: ly + 0.52, w: colW, h: 0.24, fontFace: RPT_T.FONT, fontSize: 11.5, bold: true, color: RPT_T.BLUE, align: "center", valign: "middle", margin: 0 });
-        slide.addText((c.lines || []).map((t, k, a) => ({ text: t, options: { breakLine: k !== a.length - 1 } })), { x: cx + 0.04, y: ly + 0.76, w: colW - 0.08, h: lowerH - 0.84, fontFace: RPT_T.FONT, fontSize: 9.5, bold: true, color: RPT_T.TEXT, align: "center", valign: "top", margin: 0, lineSpacingMultiple: 1.12 });
+        slide.addText(c.title, { x: cx, y: ly + 0.52, w: colW, h: 0.24, fontFace: PPT_T.FONT, fontSize: 11.5, bold: true, color: PPT_T.BLUE, align: "center", valign: "middle", margin: 0 });
+        slide.addText((c.lines || []).map((t, k, a) => ({ text: t, options: { breakLine: k !== a.length - 1 } })), { x: cx + 0.04, y: ly + 0.76, w: colW - 0.08, h: lowerH - 0.84, fontFace: PPT_T.FONT, fontSize: 9.5, bold: true, color: PPT_T.TEXT, align: "center", valign: "top", margin: 0, lineSpacingMultiple: 1.12 });
       });
     }
     return y + avail + RPT_M.gap;
@@ -1182,21 +1212,21 @@ function buildReportPpt(spec) {
     const H = 0.34;
     slide.addShape(pres.ShapeType.roundRect, { x: RPT_M.x, y: y, w: RPT_M.w, h: H, rectRadius: 0.05, fill: { color: "EDF0F6" }, line: { color: "EDF0F6", width: 0.5 } });
     slide.addShape(pres.ShapeType.ellipse, { x: RPT_M.x + 0.07, y: y + 0.035, w: 0.27, h: 0.27, fill: { color: "1F3864" }, line: { color: "1F3864", width: 0.5 } });
-    slide.addText(String(b.no), { x: RPT_M.x + 0.07, y: y + 0.035, w: 0.27, h: 0.27, fontFace: RPT_T.FONT, fontSize: 10, bold: true, color: "FFFFFF", align: "center", valign: "middle", margin: 0 });
+    slide.addText(String(b.no), { x: RPT_M.x + 0.07, y: y + 0.035, w: 0.27, h: 0.27, fontFace: PPT_T.FONT, fontSize: 10, bold: true, color: "FFFFFF", align: "center", valign: "middle", margin: 0 });
     const runsArr = [];
-    if (b.tag) runsArr.push({ text: "[" + b.tag + "] ", options: { color: RPT_T.BLUE } });
+    if (b.tag) runsArr.push({ text: "[" + b.tag + "] ", options: { color: PPT_T.BLUE } });
     runsArr.push.apply(runsArr, pptRuns(b.title, { color: "1F3864" }));
-    slide.addText(runsArr, { x: RPT_M.x + 0.44, y: y, w: RPT_M.w - 0.5, h: H, fontFace: RPT_T.FONT, fontSize: 11.5, bold: true, color: "1F3864", align: "left", valign: "middle", margin: 0 });
+    slide.addText(runsArr, { x: RPT_M.x + 0.44, y: y, w: RPT_M.w - 0.5, h: H, fontFace: PPT_T.FONT, fontSize: 11.5, bold: true, color: "1F3864", align: "left", valign: "middle", margin: 0 });
     return y + H + 0.08;
   }
 
   function renderCompare(slide, b, y) {
     const H = b.height || 0.74;
     const AW = 0.52, CW = (RPT_M.w - AW - 0.22) / 2;
-    [{ d: b.left, x: RPT_M.x, fill: "F0F0F0", fg: RPT_T.TEXT, sub: "595959" }, { d: b.right, x: RPT_M.x + CW + AW + 0.22, fill: "1F3864", fg: "FFFFFF", sub: "D6DCE8" }].forEach((s) => {
+    [{ d: b.left, x: RPT_M.x, fill: "F0F0F0", fg: PPT_T.TEXT, sub: "595959" }, { d: b.right, x: RPT_M.x + CW + AW + 0.22, fill: "1F3864", fg: "FFFFFF", sub: "D6DCE8" }].forEach((s) => {
       slide.addShape(pres.ShapeType.roundRect, { x: s.x, y: y, w: CW, h: H, rectRadius: 0.07, fill: { color: s.fill }, line: { color: s.fill, width: 0.5 } });
-      slide.addText(s.d.label, { x: s.x, y: y + 0.05, w: CW, h: 0.19, fontFace: RPT_T.FONT, fontSize: 9.5, bold: true, color: s.sub, align: "center", valign: "middle", margin: 0 });
-      slide.addText(pptRuns(s.d.value, { color: s.fg }), { x: s.x + 0.08, y: y + 0.25, w: CW - 0.16, h: H - 0.3, fontFace: RPT_T.FONT, fontSize: s.d.size || 12.5, bold: true, color: s.fg, align: "center", valign: "middle", margin: 0 });
+      slide.addText(s.d.label, { x: s.x, y: y + 0.05, w: CW, h: 0.19, fontFace: PPT_T.FONT, fontSize: 9.5, bold: true, color: s.sub, align: "center", valign: "middle", margin: 0 });
+      slide.addText(pptRuns(s.d.value, { color: s.fg }), { x: s.x + 0.08, y: y + 0.25, w: CW - 0.16, h: H - 0.3, fontFace: PPT_T.FONT, fontSize: s.d.size || 12.5, bold: true, color: s.fg, align: "center", valign: "middle", margin: 0 });
     });
     slide.addShape(pres.ShapeType.rightArrow, { x: RPT_M.x + CW + 0.11, y: y + H / 2 - 0.13, w: AW, h: 0.26, fill: { color: "1F3864" }, line: { color: "1F3864", width: 0.5 } });
     return y + H + 0.16;
@@ -1225,23 +1255,23 @@ function buildReportPpt(spec) {
     const PT = b.fontSize || 8.5;
     const n = pptEstLines(b.text, RPT_M.w, PT, 0.1);
     const h = (n * PT * 1.45) / 72 + 0.04;
-    slide.addText(pptRuns(b.text, { bold: false, color: "595959" }), { x: RPT_M.x + 0.02, y: y, w: RPT_M.w, h: h, fontFace: RPT_T.FONT, fontSize: PT, color: "595959", align: "left", valign: "top", margin: 0 });
+    slide.addText(pptRuns(b.text, { bold: false, color: "595959" }), { x: RPT_M.x + 0.02, y: y, w: RPT_M.w, h: h, fontFace: PPT_T.FONT, fontSize: PT, color: "595959", align: "left", valign: "top", margin: 0 });
     return y + h + 0.1;
   }
 
   function renderBar(slide, lines) {
     const PT = 11, LH = (PT * 1.35) / 72;
-    const n = lines.reduce((a, t) => a + pptEstLines("- " + t, RPT_T.W - 0.9, PT, 0.1), 0);
+    const n = lines.reduce((a, t) => a + pptEstLines("- " + t, PPT_T.W - 0.9, PT, 0.1), 0);
     const h = Math.max(0.68, n * LH + 0.22);
-    const y = RPT_T.H - h - 0.06;
-    slide.addShape(pres.ShapeType.rect, { x: 0, y: y, w: RPT_T.W, h: h, fill: { color: RPT_T.BAR }, line: { color: RPT_T.BAR, width: 0.5 } });
+    const y = PPT_T.H - h - 0.06;
+    slide.addShape(pres.ShapeType.rect, { x: 0, y: y, w: PPT_T.W, h: h, fill: { color: PPT_T.BAR }, line: { color: PPT_T.BAR, width: 0.5 } });
     const rr = [];
     lines.forEach((t, i) => {
-      const r = pptRuns("- " + t, { bold: true, color: RPT_T.TEXT });
+      const r = pptRuns("- " + t, { bold: true, color: PPT_T.TEXT });
       if (i !== lines.length - 1) r[r.length - 1].options.breakLine = true;
       rr.push.apply(rr, r);
     });
-    slide.addText(rr, { x: 0.25, y: y, w: RPT_T.W - 0.5, h: h, fontFace: RPT_T.FONT, fontSize: PT, bold: true, color: RPT_T.TEXT, align: "left", valign: "middle", margin: 0 });
+    slide.addText(rr, { x: 0.25, y: y, w: PPT_T.W - 0.5, h: h, fontFace: PPT_T.FONT, fontSize: PT, bold: true, color: PPT_T.TEXT, align: "left", valign: "middle", margin: 0 });
     return y;
   }
 
@@ -1251,7 +1281,7 @@ function buildReportPpt(spec) {
     slide.background = { color: "FFFFFF" };
     const blocks = sl.blocks || [];
     const bar = blocks.filter((b) => b.type === "bar")[0];
-    const bottom = bar ? renderBar(slide, bar.lines) - 0.14 : RPT_T.H - 0.22;
+    const bottom = bar ? renderBar(slide, bar.lines) - 0.14 : PPT_T.H - 0.22;
 
     const flow = blocks.filter((b) => b.type !== "bar");
     const FIXED = { note: 1, itemhead: 1, compare: 1 };
@@ -1548,6 +1578,29 @@ function renderLaws() {
     const addRowBtn = el("button", { class: "btn-secondary", type: "button", text: "➕ 조문 행 추가" }, []);
     addRowBtn.addEventListener("click", () => { law.rows.push({ kind: "same", before: "", after: "" }); renderLaws(); });
     card.appendChild(addRowBtn);
+
+    const bulkDetails = el("details", { class: "style-preview" }, []);
+    bulkDetails.appendChild(el("summary", { text: "🪄 빠른 입력: 신구조문대비표 붙여넣기 (변경전/변경후 줄 단위 자동 매칭)" }));
+    bulkDetails.appendChild(el("p", { class: "hint", text: "법제처 신구조문대비표에서 변경전·변경후를 각각 복사해 붙여넣으면, 줄 단위로 짝지어 조문 행을 자동 생성합니다. \"제N조\" 로 시작하는 줄은 head, 두 줄이 완전히 같으면 same, 그 외엔 change로 분류합니다 — 생성 후 꼭 확인하세요." }));
+    const bulkRow = el("div", { class: "row2" }, []);
+    const bulkBefore = el("textarea", { rows: "6", placeholder: "변경전 전체를 여기 붙여넣기 (줄바꿈 유지)" }, []);
+    const bulkAfter = el("textarea", { rows: "6", placeholder: "변경후 전체를 여기 붙여넣기 (줄바꿈 유지, 변경전과 줄 수를 맞춰주세요)" }, []);
+    bulkRow.appendChild(el("label", {}, [document.createTextNode("변경전"), bulkBefore]));
+    bulkRow.appendChild(el("label", {}, [document.createTextNode("변경후"), bulkAfter]));
+    bulkDetails.appendChild(bulkRow);
+    const bulkBtn = el("button", { class: "btn-secondary", type: "button", text: "🪄 이 내용으로 조문 행 자동 생성" }, []);
+    bulkBtn.addEventListener("click", () => {
+      const result = bulkParseRows(bulkBefore.value, bulkAfter.value);
+      if (result.rows.length === 0) { toast("붙여넣은 내용이 없습니다.", "err"); return; }
+      law.rows.push(...result.rows);
+      toast(
+        result.warning ? `${result.rows.length}행 생성됨 — ${result.warning}` : `${result.rows.length}행 생성됨. 아래에서 kind·내용을 확인하세요.`,
+        result.warning ? "" : "ok"
+      );
+      renderLaws();
+    });
+    bulkDetails.appendChild(bulkBtn);
+    card.appendChild(bulkDetails);
 
     const delLawBtn = el("button", { class: "btn-danger", type: "button", text: "🗑 이 법령 삭제" }, []);
     delLawBtn.addEventListener("click", () => { state.excel.laws.splice(li, 1); renderLaws(); });
