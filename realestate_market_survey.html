@@ -241,6 +241,17 @@ tbody tr:hover td{background:#f5f5f3}
       <button class="btn btn-p" onclick="exportExcel()"><i class="ti ti-download"></i>엑셀 다운로드</button>
     </div>
     <p class="hint" style="margin-bottom:10px">· 실거래건수·실거래가격 기간을 비워두면 기존 방식(건수: 최근 12개월 / 가격: 위 기준 범위)대로 계산됩니다. 입력 형식: 2026.02 (연.월)</p>
+    <div class="f" style="margin-top:4px"><label>내보낼 항목</label>
+      <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:13px;padding:6px 0">
+        <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="exp-sel-trade" checked>실거래가 (매매가·평당가)</label>
+        <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="exp-sel-ask" checked>시세 (호가·평당가)</label>
+        <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="exp-sel-kb" checked>KB시세 (시세·평당가)</label>
+        <span style="color:var(--bdr)">|</span>
+        <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="exp-sel-jeonse">전세<span style="color:var(--t3);font-size:11px">(오피스텔)</span></label>
+        <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="exp-sel-wolse">월세<span style="color:var(--t3);font-size:11px">(오피스텔)</span></label>
+        <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="exp-sel-yield">임대수익률<span style="color:var(--t3);font-size:11px">(오피스텔, 월세 함께 선택 필요)</span></label>
+      </div>
+    </div>
     <div class="div"></div>
     <div class="sec">내보낼 단지 선택</div>
     <div style="display:flex;gap:8px;margin-bottom:8px">
@@ -2638,6 +2649,16 @@ function exportExcel(){
     customPriceMonths=buildMonthRange(priceFrom,priceTo);
     if(!customPriceMonths){showMsg('msg-exp','실거래가격 기간 형식이 올바르지 않습니다. (예: 2026.02~2026.07)','me');return;}
   }
+  // 내보낼 항목 선택 — 전세/월세/임대수익률은 오피스텔 단지에만 적용된다.
+  const selTrade=document.getElementById('exp-sel-trade').checked;
+  const selAsk=document.getElementById('exp-sel-ask').checked;
+  const selKb=document.getElementById('exp-sel-kb').checked;
+  const selJeonse=document.getElementById('exp-sel-jeonse').checked;
+  const selWolse=document.getElementById('exp-sel-wolse').checked;
+  const selYield=document.getElementById('exp-sel-yield').checked;
+  if(!selTrade&&!selAsk&&!selKb&&!selJeonse&&!selWolse&&!selYield){showMsg('msg-exp','내보낼 항목을 하나 이상 선택해 주세요.','me');return;}
+  // 임대수익률은 환산보증금·환산월세 컬럼(수식이 참조하는 셀)이 있어야 계산할 수 있으므로 월세도 함께 선택되어야 한다.
+  if(selYield&&!selWolse){showMsg('msg-exp','임대수익률을 내보내려면 월세도 함께 선택해 주세요.','me');return;}
   const ids=[...document.querySelectorAll('.exp-chk:checked')].map(e=>e.value);
   if(!ids.length){showMsg('msg-exp','내보낼 단지를 선택해 주세요.','me');return;}
   const wb=XLSX.utils.book_new();
@@ -2708,14 +2729,15 @@ function exportExcel(){
     return 'IFERROR(_xlfn.MODE.SNGL('+cells+'),'+firstValid+')';
   }
   // 임대수익률(대출X/50%) 그룹·전체 평균: 개별 수익률(%)의 가중평균이 아니라, 이 행 자체의
-  // 환산보증금(L열)·환산월세(M열)·매매가(숨김 P열, 이 행에서 이미 가중평균으로 계산됨)를
-  // 가지고 프로그램과 똑같은 수익률 공식을 그 자리에서 다시 계산한다.
+  // 환산보증금(depCol열)·환산월세(rentCol열)·매매가(숨김 saleCol열, 이 행에서 이미 가중평균으로
+  // 계산됨)를 가지고 프로그램과 똑같은 수익률 공식을 그 자리에서 다시 계산한다.
+  // depCol/rentCol/saleCol은 내보내기 항목 선택에 따라 달라지는 실제 열 인덱스(0-based, COL_OFFSET 적용 전)를 받는다.
   // 대출X = (환산월세×12)÷(매매가−환산보증금)×100
   // 대출50% = (환산월세×12−매매가×50%×4.5%)÷(매매가×50%−환산보증금)×100
-  function _yieldF(rowNum){
-    const L='$'+_COLS[10+1]+'$'+rowNum; // 환산보증금
-    const M='$'+_COLS[11+1]+'$'+rowNum; // 환산월세
-    const P='$'+_COLS[14+1]+'$'+rowNum; // 매매가(숨김)
+  function _yieldF(rowNum,depCol,rentCol,saleCol){
+    const L='$'+_COLS[depCol+1]+'$'+rowNum; // 환산보증금
+    const M='$'+_COLS[rentCol+1]+'$'+rowNum; // 환산월세
+    const P='$'+_COLS[saleCol+1]+'$'+rowNum; // 매매가(숨김)
     const hasNums='AND(ISNUMBER('+P+'),ISNUMBER('+L+'),ISNUMBER('+M+'))';
     const netPos='('+P+'-'+L+')>0';
     const y1Expr='('+M+'*12)/('+P+'-'+L+')*100';
@@ -2816,6 +2838,40 @@ function exportExcel(){
     const trCountLabel=customCntMonths&&sheetFixed12.length
       ?('실거래('+sheetFixed12[0]+'~'+sheetFixed12[sheetFixed12.length-1]+')')
       :'실거래(최근1년)';
+    // 시트는 지역+유형 기준으로 묶이므로(그룹 키에 cx.type 포함) 한 시트 안의 단지는 전부
+    // 같은 유형(아파트 또는 오피스텔)이다 — 그래서 선택 항목에 따른 열 구성을 시트 단위로
+    // 한 번만 계산해 모든 단지가 동일한 헤더/열 배치를 공유하도록 한다.
+    const sheetOft=cxList[0]?.type==='오피스텔';
+    const wantJeonse=sheetOft&&selJeonse;
+    const wantWolse=sheetOft&&selWolse;
+    const wantYield=sheetOft&&selYield; // selYield면 selWolse도 참(위에서 검증)이므로 wantWolse도 항상 true
+    // modules: 이 시트에 실제로 표시할 열 그룹을 순서대로 정의. 각 그룹은 항상 2개 열(원값+평당가,
+    // 또는 환산보증금+환산월세, 또는 대출X+대출50%)을 차지한다.
+    const modules=[];
+    if(selTrade)modules.push({key:'trade',label:'실거래가',subs:['매매가','평당가']});
+    if(selAsk)modules.push({key:'ask',label:'시세',subs:['호가','평당가']});
+    if(selKb)modules.push({key:'kb',label:'KB시세',subs:['시세','평당가']});
+    if(wantJeonse)modules.push({key:'jeonse',label:'전세',subs:['평균','평당가']});
+    if(wantWolse)modules.push({key:'wolse',label:'월세',subs:['환산보증금','환산월세']});
+    if(wantYield)modules.push({key:'yield',label:'임대수익률',subs:['대출 X','대출 50%']});
+    // IDX: 선택된 모듈별 실제 열 인덱스(0-based, 기준정보 4열 다음부터 순서대로 배정)
+    const IDX={};
+    {
+      let c=4;
+      modules.forEach(mod=>{
+        if(mod.key==='trade'){IDX.trAvg=c;IDX.trPy=c+1;}
+        else if(mod.key==='ask'){IDX.askAvg=c;IDX.askPy=c+1;}
+        else if(mod.key==='kb'){IDX.kbAvg=c;IDX.kbPy=c+1;}
+        else if(mod.key==='jeonse'){IDX.jsAvg=c;IDX.jsPy=c+1;}
+        else if(mod.key==='wolse'){IDX.stdDep=c;IDX.convRent=c+1;}
+        else if(mod.key==='yield'){IDX.y1=c;IDX.y2=c+1;}
+        c+=2;
+      });
+      IDX.visibleCols=Math.max(c,4);
+    }
+    const sheetVisibleCols=IDX.visibleCols;
+    const sheetSaleColIdx=wantYield?sheetVisibleCols:null; // 임대수익률 계산용 숨김 매매가 열
+    const sheetTotalCols=wantYield?sheetVisibleCols+1:sheetVisibleCols;
     cxList.forEach((cx,ci)=>{
       const oft=cx.type==='오피스텔';
       const unitWord=oft?'호실':'세대';
@@ -2845,21 +2901,22 @@ function exportExcel(){
         const yd=calcTypeYield(tn,recM,cx.id,askM,priceM);
         return{t,tn,pyBase,dispPy,ts,ask,kb,askAvg,yd};
       });
-      const hasJ=recM.some(m=>DB.marketData[cx.id]?.[m]?.jeonse?.length);
-      const hasW=recM.some(m=>DB.marketData[cx.id]?.[m]?.wolse?.length);
-      const hasRent=hasJ||hasW;
       const wTrAvg=wtdPrice(TR,r=>r.ts?.avg||0);
       const wTrPy=wtdPyPrice(TR,r=>r.ts?.avg||0);
+      const wAskAvg=wtdPrice(TR,r=>r.askAvg||0);
       const wAskPy=wtdPyPrice(TR,r=>r.askAvg||0);
+      const wKbAvg=wtdPrice(TR,r=>r.kb?.avg||0);
       const wKbPy=wtdPyPrice(TR,r=>r.kb?.avg||0);
       const totU=cx.types.reduce((a,t)=>a+(t.units||0),0)||cx.totalUnits||1;
       const wExclPy=(cx.types.reduce((a,t)=>a+t.exclPy*(t.units||1),0)/cx.types.reduce((a,t)=>a+(t.units||1),0));
       const wDispPy=(cx.types.reduce((a,t)=>a+(oft?(t.contractPy||t.suppPy):t.suppPy)*(t.units||1),0)/cx.types.reduce((a,t)=>a+(t.units||1),0));
-      const visibleCols=hasRent?14:8;
-      // hasRent일 때 매매가(수익률 산정 기준)를 숨김 컬럼으로 하나 더 붙인다 — 그룹/전체 평균의
+      // 열 구성은 시트 전체가 공유(위에서 계산한 modules/IDX/sheetVisibleCols 등) — 단지별로 달라지지 않는다.
+      const visibleCols=sheetVisibleCols;
+      // 임대수익률 선택 시 매매가(수익률 산정 기준)를 숨김 컬럼으로 하나 더 붙인다 — 그룹/전체 평균의
       // 임대수익률을 "개별 수익률의 가중평균"이 아니라 "환산보증금·환산월세·매매가를 먼저 합쳐
       // 수익률 공식을 다시 계산"하는 방식으로 내려면 매매가를 셀로 참조할 수 있어야 하기 때문.
-      const totalCols=hasRent?visibleCols+1:visibleCols;
+      const totalCols=sheetTotalCols;
+      const saleColIdx=sheetSaleColIdx;
       const baseColIdx=visibleCols-2;
       const areaColIdx=oft?1:2; // 평당가 분모 열: 오피스텔=전용(1열), 아파트=공급/계약(2열)
       maxCol=Math.max(maxCol,totalCols);
@@ -2882,19 +2939,18 @@ function exportExcel(){
       r3[0]={v:'주차대수 총 '+(cx.parking||'-')+'대('+unitPer+' '+(cx.parkingRatio||'-')+'대)',s:{font:FONT,fill:WHITE,alignment:{horizontal:'left',vertical:'center'}}};
       pushRow(r3);
       addMerge(R-1,0,R-1,3);
-      if(hasRent){
-        const h1=[H('구분(평형)'),HB(),HB(),H(unitWord+'수'),H('실거래가'),HB(),H('당월(평당)'),HB(),H('전세'),HB(),H('월세'),HB(),H('임대수익률'),HB(),HB()];
+      {
+        const h1=[H('구분(평형)'),HB(),HB(),H(unitWord+'수')];
+        const h2=[H('타입'),H('전용(평)'),H(pyWord+'(평)'),H(unitWord+'수')];
+        modules.forEach(mod=>{
+          h1.push(H(mod.label),HB());
+          h2.push(H(mod.subs[0]),H(mod.subs[1]));
+        });
+        if(saleColIdx!=null){h1.push(HB());h2.push(H('매매가(수익률산정)'));}
         pushRow(h1);
-        addMerge(R-1,0,R-1,2); addMerge(R-1,4,R-1,5); addMerge(R-1,6,R-1,7);
-        addMerge(R-1,8,R-1,9); addMerge(R-1,10,R-1,11); addMerge(R-1,12,R-1,13);
-        const h2=[H('타입'),H('전용(평)'),H(pyWord+'(평)'),H(unitWord+'수'),H('평균'),H('평당가'),H('호가'),H('KB시세'),H('평균'),H('평당가'),H('환산보증금'),H('환산월세'),H('대출 X'),H('대출 50%'),H('매매가(수익률산정)')];
-        pushRow(h2);
-        addMerge(R-2,3,R-1,3);
-      } else {
-        const h1=[H('구분(평형)'),HB(),HB(),H(unitWord+'수'),H('실거래가'),HB(),H('당월(평당)'),HB()];
-        pushRow(h1);
-        addMerge(R-1,0,R-1,2); addMerge(R-1,4,R-1,5); addMerge(R-1,6,R-1,7);
-        const h2=[H('타입'),H('전용(평)'),H(pyWord+'(평)'),H(unitWord+'수'),H('평균'),H('평당가'),H('호가'),H('KB시세')];
+        addMerge(R-1,0,R-1,2);
+        let mc=4;
+        modules.forEach(()=>{addMerge(R-1,mc,R-1,mc+1);mc+=2;});
         pushRow(h2);
         addMerge(R-2,3,R-1,3);
       }
@@ -2911,25 +2967,38 @@ function exportExcel(){
           allTypeRowNums.push(R+1+ROW_OFFSET); // 이 타입 행이 pushRow 이후 위치할 1-based 엑셀 행 번호
           const wr=r.yd.wolseResult;const y=wr?.yld;
           const rowNum=allTypeRowNums[allTypeRowNums.length-1];
-          // 실거래·전세 평당가는 이 행 자체의 가격(F/J열)÷평형 수식으로 계산한다. 호가·KB시세
-          // 평당가는 원가를 저장해 둘 별도 숨김열이 없으므로(요청에 따라 제거) 정적값으로 유지.
-          if(hasRent){
-            pushRow([
-              D(r.tn||'-'),DP(r.t.exclPy),DP(r.dispPy),D(r.t.units),
-              D(r.ts?Math.round(r.ts.avg):null),DF(_pyF(rowNum,4,areaColIdx),r.ts&&r.pyBase?Math.round(r.ts.avg/r.pyBase):null),
-              D(r.askAvg&&r.pyBase?Math.round(r.askAvg/r.pyBase):null),D(r.kb?.avg&&r.pyBase?Math.round(r.kb.avg/r.pyBase):null),
-              D(r.yd.jsAvg?Math.round(r.yd.jsAvg):null),DF(_pyF(rowNum,8,areaColIdx),r.yd.jsAvg&&r.pyBase?Math.round(r.yd.jsAvg/r.pyBase):null),
-              D(wr?wr.stdDep:null),D(wr?Math.round(wr.convRentAvg):null),
-              YP(y?.y1), YP(y?.y2),
-              D(r.yd.salePrice?Math.round(r.yd.salePrice):null)
-            ]);
-          } else {
-            pushRow([
-              D(r.tn||'-'),DP(r.t.exclPy),DP(r.dispPy),D(r.t.units),
-              D(r.ts?Math.round(r.ts.avg):null),DF(_pyF(rowNum,4,areaColIdx),r.ts&&r.pyBase?Math.round(r.ts.avg/r.pyBase):null),
-              D(r.askAvg&&r.pyBase?Math.round(r.askAvg/r.pyBase):null),D(r.kb?.avg&&r.pyBase?Math.round(r.kb.avg/r.pyBase):null)
-            ]);
-          }
+          // 실거래·시세·전세 평당가는 이 행 자체의 원값÷평형 수식으로 계산해, 원값 셀을 고치면
+          // 평당가도 따라 바뀐다.
+          const rowCells=[D(r.tn||'-'),DP(r.t.exclPy),DP(r.dispPy),D(r.t.units)];
+          modules.forEach(mod=>{
+            if(mod.key==='trade'){
+              rowCells.push(
+                D(r.ts?Math.round(r.ts.avg):null),
+                DF(_pyF(rowNum,IDX.trAvg,areaColIdx),r.ts&&r.pyBase?Math.round(r.ts.avg/r.pyBase):null)
+              );
+            } else if(mod.key==='ask'){
+              rowCells.push(
+                D(r.askAvg!=null?Math.round(r.askAvg):null),
+                DF(_pyF(rowNum,IDX.askAvg,areaColIdx),r.askAvg&&r.pyBase?Math.round(r.askAvg/r.pyBase):null)
+              );
+            } else if(mod.key==='kb'){
+              rowCells.push(
+                D(r.kb?.avg!=null?Math.round(r.kb.avg):null),
+                DF(_pyF(rowNum,IDX.kbAvg,areaColIdx),r.kb?.avg&&r.pyBase?Math.round(r.kb.avg/r.pyBase):null)
+              );
+            } else if(mod.key==='jeonse'){
+              rowCells.push(
+                D(r.yd.jsAvg?Math.round(r.yd.jsAvg):null),
+                DF(_pyF(rowNum,IDX.jsAvg,areaColIdx),r.yd.jsAvg&&r.pyBase?Math.round(r.yd.jsAvg/r.pyBase):null)
+              );
+            } else if(mod.key==='wolse'){
+              rowCells.push(D(wr?wr.stdDep:null),D(wr?Math.round(wr.convRentAvg):null));
+            } else if(mod.key==='yield'){
+              rowCells.push(YP(y?.y1),YP(y?.y2));
+            }
+          });
+          if(saleColIdx!=null)rowCells.push(D(r.yd.salePrice?Math.round(r.yd.salePrice):null));
+          pushRow(rowCells);
         });
         const gEndR=R-1;
         const grng={s:gStartR+1+ROW_OFFSET, e:gEndR+1+ROW_OFFSET};
@@ -2938,93 +3007,61 @@ function exportExcel(){
           const gLabel=(g.groupLabel||'그룹')+' 평균';
           const rowNums=[]; for(let rr=grng.s; rr<=grng.e; rr++) rowNums.push(rr);
           // ★ 그룹평균 행: 평형(전용/공급/계약)은 그대로 정적값, 나머지는 수식으로 그룹 내 타입행을 가중평균
-          const fTrAvg=_wf(4,rowNums), fTrPy=_wf(5,rowNums), fAskPy=_wf(6,rowNums), fKbPy=_wf(7,rowNums);
-          if(hasRent){
-            const fJsAvg=_wf(8,rowNums), fJsPy=_wf(9,rowNums), fStdDep=_modeF(10,rowNums), fConvRent=_wf(11,rowNums);
-            const fSaleP=_wf(14,rowNums);
-            const thisRowNum=R+1+ROW_OFFSET; // 이 그룹평균 행 자신의 1-based 엑셀 행 번호 (수익률 수식이 자기 행의 L/M/P열을 참조)
-            const {y1:fY1,y2:fY2}=_yieldF(thisRowNum);
-            pushRow([
-              G(gLabel,gFill),
-              GP(ga.avgExcl!=null?ga.avgExcl:null,gFill),
-              GP(ga.avgDisp!=null?ga.avgDisp:null,gFill),
-              G(ga.totU||null,gFill),
-              GF(fTrAvg,ga.trAvg||null,gFill),
-              GF(fTrPy,ga.trPy||null,gFill),
-              GF(fAskPy,ga.askPy||null,gFill),
-              GF(fKbPy,ga.kbPy||null,gFill),
-              GF(fJsAvg,ga.jsAvg||null,gFill),
-              GF(fJsPy,ga.jsPy||null,gFill),
-              GF(fStdDep,ga.stdDep||null,gFill),
-              GF(fConvRent,ga.convRent||null,gFill),
-              GF(fY1,ga.gaY1!=null?ga.gaY1.toFixed(1)+'%':'',gFill),
-              GF(fY2,ga.gaY2!=null?ga.gaY2.toFixed(1)+'%':'',gFill),
-              GF(fSaleP,ga.salePrice||null,gFill)
-            ]);
-          } else {
-            pushRow([
-              G(gLabel,gFill),
-              GP(ga.avgExcl!=null?ga.avgExcl:null,gFill),
-              GP(ga.avgDisp!=null?ga.avgDisp:null,gFill),
-              G(ga.totU||null,gFill),
-              GF(fTrAvg,ga.trAvg||null,gFill),
-              GF(fTrPy,ga.trPy||null,gFill),
-              GF(fAskPy,ga.askPy||null,gFill),
-              GF(fKbPy,ga.kbPy||null,gFill)
-            ]);
-          }
+          const gRowCells=[G(gLabel,gFill),GP(ga.avgExcl!=null?ga.avgExcl:null,gFill),GP(ga.avgDisp!=null?ga.avgDisp:null,gFill),G(ga.totU||null,gFill)];
+          modules.forEach(mod=>{
+            if(mod.key==='trade'){
+              gRowCells.push(GF(_wf(IDX.trAvg,rowNums),ga.trAvg||null,gFill),GF(_wf(IDX.trPy,rowNums),ga.trPy||null,gFill));
+            } else if(mod.key==='ask'){
+              gRowCells.push(GF(_wf(IDX.askAvg,rowNums),ga.askAvg||null,gFill),GF(_wf(IDX.askPy,rowNums),ga.askPy||null,gFill));
+            } else if(mod.key==='kb'){
+              gRowCells.push(GF(_wf(IDX.kbAvg,rowNums),ga.kbAvg||null,gFill),GF(_wf(IDX.kbPy,rowNums),ga.kbPy||null,gFill));
+            } else if(mod.key==='jeonse'){
+              gRowCells.push(GF(_wf(IDX.jsAvg,rowNums),ga.jsAvg||null,gFill),GF(_wf(IDX.jsPy,rowNums),ga.jsPy||null,gFill));
+            } else if(mod.key==='wolse'){
+              gRowCells.push(GF(_modeF(IDX.stdDep,rowNums),ga.stdDep||null,gFill),GF(_wf(IDX.convRent,rowNums),ga.convRent||null,gFill));
+            } else if(mod.key==='yield'){
+              const thisRowNum=R+1+ROW_OFFSET; // 이 그룹평균 행 자신의 1-based 엑셀 행 번호 (수익률 수식이 자기 행의 열을 참조)
+              const {y1:fY1,y2:fY2}=_yieldF(thisRowNum,IDX.stdDep,IDX.convRent,saleColIdx);
+              gRowCells.push(GF(fY1,ga.gaY1!=null?ga.gaY1.toFixed(1)+'%':'',gFill),GF(fY2,ga.gaY2!=null?ga.gaY2.toFixed(1)+'%':'',gFill));
+            }
+          });
+          if(saleColIdx!=null)gRowCells.push(GF(_wf(saleColIdx,rowNums),ga.salePrice||null,gFill));
+          pushRow(gRowCells);
         }
       });
       const dataEndR=R-1;
       // ── 전체 평균 행 (파랑, 수식 내장) ──────────────────────────────
-      const fTrAvg=_wf(4,allTypeRowNums);
-      const fTrPy=_wf(5,allTypeRowNums);
-      const fAskPy=_wf(6,allTypeRowNums);
-      const fKbPy=_wf(7,allTypeRowNums);
-      if(hasRent){
-        const wJsAvg=wtdPrice(TR,r=>r.yd.jsAvg||0);
-        const wJsPy=wtdPyPrice(TR,r=>r.yd.jsAvg||0);
-        const wStdDep=modeStdDep(TR);
-        const wConvRent=wtdPrice(TR.filter(r=>r.yd.wolseResult),r=>r.yd.wolseResult.convRentAvg||0);
+      const aRowCells=[A('평균',aFill),AP(wExclPy?Math.round(wExclPy*100)/100:null,aFill),AP(wDispPy?Math.round(wDispPy*100)/100:null,aFill),A(totU||null,aFill)];
+      // wolse/yield는 서로 같은 값(wStdDep/wConvRent)이 필요하므로 한 번만 계산해 공유한다.
+      let _wStdDep=null,_wConvRent=null;
+      if(wantWolse){_wStdDep=modeStdDep(TR);_wConvRent=wtdPrice(TR.filter(r=>r.yd.wolseResult),r=>r.yd.wolseResult.convRentAvg||0);}
+      modules.forEach(mod=>{
+        if(mod.key==='trade'){
+          aRowCells.push(AF(_wf(IDX.trAvg,allTypeRowNums),wTrAvg?Math.round(wTrAvg):null,aFill),AF(_wf(IDX.trPy,allTypeRowNums),wTrPy||null,aFill));
+        } else if(mod.key==='ask'){
+          aRowCells.push(AF(_wf(IDX.askAvg,allTypeRowNums),wAskAvg?Math.round(wAskAvg):null,aFill),AF(_wf(IDX.askPy,allTypeRowNums),wAskPy||null,aFill));
+        } else if(mod.key==='kb'){
+          aRowCells.push(AF(_wf(IDX.kbAvg,allTypeRowNums),wKbAvg?Math.round(wKbAvg):null,aFill),AF(_wf(IDX.kbPy,allTypeRowNums),wKbPy||null,aFill));
+        } else if(mod.key==='jeonse'){
+          const wJsAvg=wtdPrice(TR,r=>r.yd.jsAvg||0);
+          const wJsPy=wtdPyPrice(TR,r=>r.yd.jsAvg||0);
+          aRowCells.push(AF(_wf(IDX.jsAvg,allTypeRowNums),wJsAvg?Math.round(wJsAvg):null,aFill),AF(_wf(IDX.jsPy,allTypeRowNums),wJsPy||null,aFill));
+        } else if(mod.key==='wolse'){
+          aRowCells.push(AF(_modeF(IDX.stdDep,allTypeRowNums),_wStdDep||null,aFill),AF(_wf(IDX.convRent,allTypeRowNums),_wConvRent?Math.round(_wConvRent):null,aFill));
+        } else if(mod.key==='yield'){
+          const wSaleP=wtdPrice(TR,r=>r.yd.salePrice||0);
+          const wY1=wSaleP&&_wConvRent&&_wStdDep?(_wConvRent*12)/(wSaleP-_wStdDep)*100:null;
+          const wY2=wSaleP&&_wConvRent&&_wStdDep?(()=>{const la=wSaleP*0.5;const eq=wSaleP-la-_wStdDep;return eq>0?(_wConvRent*12-la*0.045)/eq*100:null;})():null;
+          const thisRowNum=R+1+ROW_OFFSET; // 이 전체평균 행 자신의 1-based 엑셀 행 번호
+          const {y1:fY1,y2:fY2}=_yieldF(thisRowNum,IDX.stdDep,IDX.convRent,saleColIdx);
+          aRowCells.push(AFS(fY1,wY1!=null?wY1.toFixed(1)+'%':'',aFill),AFS(fY2,wY2!=null?wY2.toFixed(1)+'%':'',aFill));
+        }
+      });
+      if(saleColIdx!=null){
         const wSaleP=wtdPrice(TR,r=>r.yd.salePrice||0);
-        const wY1=wSaleP&&wConvRent&&wStdDep?(wConvRent*12)/(wSaleP-wStdDep)*100:null;
-        const wY2=wSaleP&&wConvRent&&wStdDep?(()=>{const la=wSaleP*0.5;const eq=wSaleP-la-wStdDep;return eq>0?(wConvRent*12-la*0.045)/eq*100:null;})():null;
-        const fJsAvg=_wf(8,allTypeRowNums);
-        const fJsPy=_wf(9,allTypeRowNums);
-        const fStdDep=_modeF(10,allTypeRowNums);
-        const fConvRent=_wf(11,allTypeRowNums);
-        const fSaleP=_wf(14,allTypeRowNums);
-        const thisRowNum=R+1+ROW_OFFSET; // 이 전체평균 행 자신의 1-based 엑셀 행 번호
-        const {y1:fY1,y2:fY2}=_yieldF(thisRowNum);
-        pushRow([
-          A('평균',aFill),
-          AP(wExclPy?Math.round(wExclPy*100)/100:null,aFill),
-          AP(wDispPy?Math.round(wDispPy*100)/100:null,aFill),
-          A(totU||null,aFill),
-          AF(fTrAvg, wTrAvg?Math.round(wTrAvg):null, aFill),
-          AF(fTrPy, wTrPy||null, aFill),
-          AF(fAskPy, wAskPy||null, aFill),
-          AF(fKbPy, wKbPy||null, aFill),
-          AF(fJsAvg, wJsAvg?Math.round(wJsAvg):null, aFill),
-          AF(fJsPy, wJsPy||null, aFill),
-          AF(fStdDep, wStdDep||null, aFill),
-          AF(fConvRent, wConvRent?Math.round(wConvRent):null, aFill),
-          AFS(fY1, wY1!=null?wY1.toFixed(1)+'%':'', aFill),
-          AFS(fY2, wY2!=null?wY2.toFixed(1)+'%':'', aFill),
-          AF(fSaleP, wSaleP?Math.round(wSaleP):null, aFill)
-        ]);
-      } else {
-        pushRow([
-          A('평균',aFill),
-          AP(wExclPy?Math.round(wExclPy*100)/100:null,aFill),
-          AP(wDispPy?Math.round(wDispPy*100)/100:null,aFill),
-          A(totU||null,aFill),
-          AF(fTrAvg, wTrAvg?Math.round(wTrAvg):null, aFill),
-          AF(fTrPy, wTrPy||null, aFill),
-          AF(fAskPy, wAskPy||null, aFill),
-          AF(fKbPy, wKbPy||null, aFill)
-        ]);
+        aRowCells.push(AF(_wf(saleColIdx,allTypeRowNums),wSaleP?Math.round(wSaleP):null,aFill));
       }
+      pushRow(aRowCells);
       const avgR=R-1;
       let tot1y_tr=0,tot1y_js=0,tot1y_ws=0;
       last12.forEach(m=>{
@@ -3035,23 +3072,18 @@ function exportExcel(){
       });
       const totalListings=getListingTotal(cx.id,askM);
       const listStr=totalListings!=null?totalListings+'건':'-';
-      if(hasRent){
-        pushRow([
-          M('매물 건수'),M(listStr),M(trCountLabel),M(tot1y_tr+'건'),
-          M('전세실거래'),M(tot1y_js+'건'),M('월세실거래'),M(tot1y_ws+'건'),
-          M(''),M(''),M(''),M(''),M(''),M(''),M('')
-        ]);
-      } else {
-        pushRow([
-          M('매물 건수'),M(listStr),M(trCountLabel),M(tot1y_tr+'건'),
-          M(''),M(''),M(''),M('')
-        ]);
-      }
+      // 매물건수/실거래건수 요약행 — 항상 처음 4칸(매물건수·건수·실거래건수라벨·건수)을 쓰고,
+      // 전세/월세 데이터가 표에 나오는 경우(오피스텔 렌트 모듈 중 하나라도 선택됨) 다음 4칸에
+      // 전세·월세 실거래건수를 이어 붙인 뒤, 나머지는 빈 칸으로 totalCols까지 채운다.
+      let footerRow=[M('매물 건수'),M(listStr),M(trCountLabel),M(tot1y_tr+'건')];
+      if(wantJeonse||wantWolse||wantYield){footerRow.push(M('전세실거래'),M(tot1y_js+'건'),M('월세실거래'),M(tot1y_ws+'건'));}
+      while(footerRow.length<totalCols)footerRow.push(M(''));
+      footerRow=footerRow.slice(0,totalCols);
+      pushRow(footerRow);
       const cntR=R-1;
       const blockEndR=R-1;
-      // 겉 테두리는 실제로 보이는 열(visibleCols)까지만 — totalCols는 hasRent 블록의 숨김
-      // 매매가(P)열까지 포함하고 있어서, 이 기준으로 테두리를 그리면 !hasRent 단지의 경우
-      // 내용이 전혀 없는 전세/환산보증금/임대수익률 열까지 표가 쓸데없이 늘어나 보이는 문제가 있었다.
+      // 겉 테두리는 실제로 보이는 열(visibleCols)까지만 — totalCols는 임대수익률 선택 시 붙는
+      // 숨김 매매가 열까지 포함하고 있어서, 이 기준으로 테두리를 그리면 표가 쓸데없이 늘어나 보인다.
       for(let cc=0;cc<visibleCols;cc++){
         markBorder(blockStartR,cc,'top');
         markBorder(blockEndR,cc,'bottom');
@@ -3061,7 +3093,6 @@ function exportExcel(){
         markBorder(rr,visibleCols-1,'right');
       }
     });
-    const sheetOft=cxList[0]?.type==='오피스텔';
     const regionFill=sheetOft
       ?{patternType:'solid',fgColor:{rgb:'DAE3F3'}}
       :{patternType:'solid',fgColor:{rgb:'A9D18E'}};
@@ -3185,9 +3216,10 @@ function exportExcel(){
     const colW=[];
     colW.push({wch:2});
     for(let i=0;i<Math.max(maxCol+2,9);i++)colW.push({wch:i===0?11:i<4?8:9});
-    // 매매가(수익률 산정용, hasRent 블록의 15번째 데이터열=P열) 숨김 처리 — 화면에는 안 보이지만
-    // 그룹/전체 평균의 임대수익률 수식이 참조하는 값이므로 셀 자체는 남겨둔다.
-    if(colW[15])colW[15]={...colW[15],hidden:true};
+    // 매매가(수익률 산정용 숨김열) 숨김 처리 — 화면에는 안 보이지만 그룹/전체 평균의
+    // 임대수익률 수식이 참조하는 값이므로 셀 자체는 남겨둔다. 임대수익률을 선택하지 않았으면
+    // 이 열 자체가 없다(sheetSaleColIdx===null).
+    if(sheetSaleColIdx!=null&&colW[sheetSaleColIdx+COL_OFFSET])colW[sheetSaleColIdx+COL_OFFSET]={...colW[sheetSaleColIdx+COL_OFFSET],hidden:true};
     ws['!cols']=colW;
     const sn=sheetName.length>31?sheetName.slice(0,31):sheetName;
     XLSX.utils.book_append_sheet(wb,ws,sn);
