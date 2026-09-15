@@ -2908,6 +2908,9 @@ function exportExcel(){
       const wKbAvg=wtdPrice(TR,r=>r.kb?.avg||0);
       const wKbPy=wtdPyPrice(TR,r=>r.kb?.avg||0);
       const totU=cx.types.reduce((a,t)=>a+(t.units||0),0)||cx.totalUnits||1;
+      // 사용승인일 옆 "총 N 세대수"는 아래 타입별 세대수 합(totU)이 아니라, 단지 등록 시
+      // 입력한 총세대수를 그대로 표시한다.
+      const dispTotU=cx.totalUnits||totU;
       const wExclPy=(cx.types.reduce((a,t)=>a+t.exclPy*(t.units||1),0)/cx.types.reduce((a,t)=>a+(t.units||1),0));
       const wDispPy=(cx.types.reduce((a,t)=>a+(oft?(t.contractPy||t.suppPy):t.suppPy)*(t.units||1),0)/cx.types.reduce((a,t)=>a+(t.units||1),0));
       // 열 구성은 시트 전체가 공유(위에서 계산한 modules/IDX/sheetVisibleCols 등) — 단지별로 달라지지 않는다.
@@ -2932,7 +2935,7 @@ function exportExcel(){
       addMerge(R-1,baseColIdx,R-1,visibleCols-1); // *공급/전용평형기준 라벨을 맨 오른쪽 셀까지 병합해 가운데 정렬
       const r2=new Array(totalCols).fill(null).map(()=>WB(''));
       r2[0]={v:'사용승인일 '+(cx.approved||'-'),s:{font:FONT,fill:WHITE,alignment:{horizontal:'left',vertical:'center'}}};
-      r2[2]={v:'총 '+totU+' '+unitWord+'수',s:{font:FONT,fill:WHITE,alignment:{horizontal:'left',vertical:'center'}}};
+      r2[2]={v:'총 '+dispTotU+' '+unitWord+'수',s:{font:FONT,fill:WHITE,alignment:{horizontal:'left',vertical:'center'}}};
       pushRow(r2);
       addMerge(R-1,0,R-1,1);
       const r3=new Array(totalCols).fill(null).map(()=>WB(''));
