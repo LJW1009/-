@@ -221,11 +221,26 @@ tbody tr:hover td{background:#f5f5f3}
     <div class="sec"><i class="ti ti-file-spreadsheet" style="color:var(--gd);margin-right:5px"></i>엑셀 내보내기</div>
     <p class="hint" style="margin-bottom:10px">· 시트 구분: 지역+유형 기준 / 동일 지역·유형은 같은 시트 / 전세·월세·수익률은 데이터 있을 때만 출력</p>
     <div class="row" style="align-items:flex-end">
-      <div class="f" style="max-width:140px"><label>기준 범위</label>
+      <div class="f" style="max-width:140px"><label>기준 범위 (전세·월세)</label>
         <select id="exp-range"><option value="3">최근 3개월</option><option value="6" selected>최근 6개월</option><option value="12">최근 12개월</option></select>
+      </div>
+      <div class="f" style="max-width:230px"><label>실거래건수 기간 (선택, 최대 12개월)</label>
+        <div style="display:flex;gap:4px;align-items:center">
+          <input id="exp-cnt-from" type="text" placeholder="2026.02" style="width:95px">
+          <span style="color:var(--t3)">~</span>
+          <input id="exp-cnt-to" type="text" placeholder="2026.07" style="width:95px">
+        </div>
+      </div>
+      <div class="f" style="max-width:230px"><label>실거래가격 기간 (선택)</label>
+        <div style="display:flex;gap:4px;align-items:center">
+          <input id="exp-price-from" type="text" placeholder="2026.02" style="width:95px">
+          <span style="color:var(--t3)">~</span>
+          <input id="exp-price-to" type="text" placeholder="2026.07" style="width:95px">
+        </div>
       </div>
       <button class="btn btn-p" onclick="exportExcel()"><i class="ti ti-download"></i>엑셀 다운로드</button>
     </div>
+    <p class="hint" style="margin-bottom:10px">· 실거래건수·실거래가격 기간을 비워두면 기존 방식(건수: 최근 12개월 / 가격: 위 기준 범위)대로 계산됩니다. 입력 형식: 2026.02 (연.월)</p>
     <div class="div"></div>
     <div class="sec">내보낼 단지 선택</div>
     <div style="display:flex;gap:8px;margin-bottom:8px">
@@ -478,8 +493,11 @@ function calcYield(salePrice,convRent,stdDep){
   return{y1,y2};
 }
 // 타입별 수익률 계산 헬퍼
-function calcTypeYield(tn,recM,cid,askM){
+// tradeM: 매매 실거래가 집계에만 쓰는 기간(엑셀 내보내기의 "실거래가격 기간" 커스텀 설정용).
+// 생략하면 recM과 동일하게 동작 — 전세/월세 기간(recM)에는 영향을 주지 않는다.
+function calcTypeYield(tn,recM,cid,askM,tradeM){
   const md=DB.marketData[cid];
+  const tm=tradeM||recM;
   // 전세 평균
   let jPrices=[];
   recM.forEach(m=>{(md?.[m]?.jeonse||[]).filter(j=>j.typeName===tn).forEach(j=>jPrices.push(j.price));});
@@ -491,7 +509,7 @@ function calcTypeYield(tn,recM,cid,askM){
 
   // 매매가 (실거래→없으면 최신 호가 평균)
   let tradePrices=[];
-  recM.forEach(m=>{(md?.[m]?.trades||[]).filter(t=>t.typeName===tn).forEach(t=>tradePrices.push(t.price));});
+  tm.forEach(m=>{(md?.[m]?.trades||[]).filter(t=>t.typeName===tn).forEach(t=>tradePrices.push(t.price));});
   let salePrice=tradePrices.length?tradePrices.reduce((a,b)=>a+b,0)/tradePrices.length:null;
   if(!salePrice&&askM){
     const ask=(md?.[askM]?.asking||[]).find(a=>a.typeName===tn);
@@ -2589,8 +2607,37 @@ function selAllExp(v){
   document.querySelectorAll('#exp-list input[type="checkbox"]').forEach(function(e){e.checked=v;e.indeterminate=false;});
 }
 
+// 'YYYY.MM' 형식의 시작~종료월 사이 모든 월을 오름차순으로 생성 (양끝 포함).
+// 형식이 잘못됐거나 시작>종료면 null 반환.
+function buildMonthRange(from,to){
+  if(!/^\d{4}\.\d{2}$/.test(from)||!/^\d{4}\.\d{2}$/.test(to))return null;
+  let[fy,fm]=from.split('.').map(Number);
+  const[ty,tm]=to.split('.').map(Number);
+  if(fy*12+fm>ty*12+tm)return null;
+  const months=[];
+  let y=fy,m=fm;
+  while(y*12+m<=ty*12+tm&&months.length<240){
+    months.push(y+'.'+String(m).padStart(2,'0'));
+    m++;if(m>12){m=1;y++;}
+  }
+  return months;
+}
 function exportExcel(){
   const rangeN=parseInt(document.getElementById('exp-range').value)||6;
+  const cntFrom=(document.getElementById('exp-cnt-from').value||'').trim();
+  const cntTo=(document.getElementById('exp-cnt-to').value||'').trim();
+  const priceFrom=(document.getElementById('exp-price-from').value||'').trim();
+  const priceTo=(document.getElementById('exp-price-to').value||'').trim();
+  let customCntMonths=null;
+  if(cntFrom||cntTo){
+    customCntMonths=buildMonthRange(cntFrom,cntTo);
+    if(!customCntMonths){showMsg('msg-exp','실거래건수 기간 형식이 올바르지 않습니다. (예: 2026.02~2026.07)','me');return;}
+  }
+  let customPriceMonths=null;
+  if(priceFrom||priceTo){
+    customPriceMonths=buildMonthRange(priceFrom,priceTo);
+    if(!customPriceMonths){showMsg('msg-exp','실거래가격 기간 형식이 올바르지 않습니다. (예: 2026.02~2026.07)','me');return;}
+  }
   const ids=[...document.querySelectorAll('.exp-chk:checked')].map(e=>e.value);
   if(!ids.length){showMsg('msg-exp','내보낼 단지를 선택해 주세요.','me');return;}
   const wb=XLSX.utils.book_new();
@@ -2751,7 +2798,9 @@ function exportExcel(){
       });
       return latest;
     })();
-    const sheetFixed12=(()=>{
+    // 실거래건수 기간을 직접 지정한 경우 그 기간(최대 12개월)을 쓰고, 아니면 기존 방식대로
+    // 내보내는 단지들 중 가장 최신 데이터월 기준 최근 12개월을 쓴다.
+    const sheetFixed12=customCntMonths?customCntMonths.slice(-12):(()=>{
       if(!sheetLatestM)return [];
       const [ly,lm]=sheetLatestM.split('.').map(Number);
       const months=[];
@@ -2762,6 +2811,11 @@ function exportExcel(){
       }
       return months;
     })();
+    // "실거래(최근1년)" 라벨은 기본(최근12개월 고정)일 때만 맞는 표현이므로, 커스텀 기간을
+    // 지정하면 실제 표시 중인 기간(YYYY.MM~YYYY.MM)으로 바꿔서 보여준다.
+    const trCountLabel=customCntMonths&&sheetFixed12.length
+      ?('실거래('+sheetFixed12[0]+'~'+sheetFixed12[sheetFixed12.length-1]+')')
+      :'실거래(최근1년)';
     cxList.forEach((cx,ci)=>{
       const oft=cx.type==='오피스텔';
       const unitWord=oft?'호실':'세대';
@@ -2772,6 +2826,9 @@ function exportExcel(){
       const baseWord=oft?'전용평형기준':'공급평형기준';
       const allM=sortM(Object.keys(DB.marketData[cx.id]||{}));
       const recM=allM.slice(-rangeN);const last12=sheetFixed12;
+      // 실거래가격 기간을 직접 지정한 경우 그 기간을 쓰고, 아니면 기존처럼 기준 범위(recM)를 쓴다.
+      // 전세·월세 기간(recM)에는 영향을 주지 않는다.
+      const priceM=customPriceMonths||recM;
       const askM=latestM(cx.id,'asking');const kbM=latestM(cx.id,'kb');
       if(!allM.length)return;
       if(ci>0){pushRow([]);pushRow([]);pushRow([]);}
@@ -2780,12 +2837,12 @@ function exportExcel(){
         const pyBase=oft?t.exclPy:t.suppPy;
         const dispPy=oft?(t.contractPy||t.suppPy):t.suppPy;
         let trades=[];
-        recM.forEach(m=>{const md=DB.marketData[cx.id]?.[m];if(md)trades.push(...md.trades.filter(tr=>tr.typeName===tn));});
+        priceM.forEach(m=>{const md=DB.marketData[cx.id]?.[m];if(md)trades.push(...md.trades.filter(tr=>tr.typeName===tn));});
         const ts=calcStats(trades);
         const ask=askM?(DB.marketData[cx.id]?.[askM]?.asking||[]).find(a=>a.typeName===tn):null;
         const kb=kbM?(DB.marketData[cx.id]?.[kbM]?.kb||[]).find(k=>k.typeName===tn):null;
         const askAvg=ask?(ask.lo&&ask.hi?(ask.lo+ask.hi)/2:(ask.lo||ask.hi)):null;
-        const yd=calcTypeYield(tn,recM,cx.id,askM);
+        const yd=calcTypeYield(tn,recM,cx.id,askM,priceM);
         return{t,tn,pyBase,dispPy,ts,ask,kb,askAvg,yd};
       });
       const hasJ=recM.some(m=>DB.marketData[cx.id]?.[m]?.jeonse?.length);
@@ -2980,13 +3037,13 @@ function exportExcel(){
       const listStr=totalListings!=null?totalListings+'건':'-';
       if(hasRent){
         pushRow([
-          M('매물 건수'),M(listStr),M('실거래(최근1년)'),M(tot1y_tr+'건'),
+          M('매물 건수'),M(listStr),M(trCountLabel),M(tot1y_tr+'건'),
           M('전세실거래'),M(tot1y_js+'건'),M('월세실거래'),M(tot1y_ws+'건'),
           M(''),M(''),M(''),M(''),M(''),M(''),M('')
         ]);
       } else {
         pushRow([
-          M('매물 건수'),M(listStr),M('실거래(최근1년)'),M(tot1y_tr+'건'),
+          M('매물 건수'),M(listStr),M(trCountLabel),M(tot1y_tr+'건'),
           M(''),M(''),M(''),M('')
         ]);
       }
