@@ -219,9 +219,9 @@ tbody tr:hover td{background:#f5f5f3}
   <div class="ph"><h2>내보내기 · DB 관리</h2><p>엑셀 다운로드 및 DB 백업·복원. 미입력 항목은 자동 제외됩니다.</p></div>
   <div class="card">
     <div class="sec"><i class="ti ti-file-spreadsheet" style="color:var(--gd);margin-right:5px"></i>엑셀 내보내기</div>
-    <p class="hint" style="margin-bottom:10px">· 시트 구분: 지역+유형 기준 / 동일 지역·유형은 같은 시트 / 전세·월세·수익률은 데이터 있을 때만 출력</p>
+    <p class="hint" style="margin-bottom:10px">· 시트 구분: 지역+유형 기준 / 동일 지역·유형은 같은 시트 / 기본값 그대로 바로 다운로드 가능 — 기간·항목은 필요할 때만 조정하세요.</p>
     <div class="row" style="align-items:flex-end">
-      <div class="f" style="max-width:140px"><label>기준 범위 (전세·월세)</label>
+      <div class="f" style="max-width:140px"><label>기준 범위 (기본값)</label>
         <select id="exp-range"><option value="3">최근 3개월</option><option value="6" selected>최근 6개월</option><option value="12">최근 12개월</option></select>
       </div>
       <div class="f" style="max-width:230px"><label>실거래건수 기간 (선택, 최대 12개월)</label>
@@ -238,18 +238,24 @@ tbody tr:hover td{background:#f5f5f3}
           <input id="exp-price-to" type="text" placeholder="2026.07" style="width:95px">
         </div>
       </div>
+      <div class="f" style="max-width:230px"><label>전세·월세 기간 (선택)</label>
+        <div style="display:flex;gap:4px;align-items:center">
+          <input id="exp-rent-from" type="text" placeholder="2026.02" style="width:95px">
+          <span style="color:var(--t3)">~</span>
+          <input id="exp-rent-to" type="text" placeholder="2026.07" style="width:95px">
+        </div>
+      </div>
       <button class="btn btn-p" onclick="exportExcel()"><i class="ti ti-download"></i>엑셀 다운로드</button>
     </div>
-    <p class="hint" style="margin-bottom:10px">· 실거래건수·실거래가격 기간을 비워두면 기존 방식(건수: 최근 12개월 / 가격: 위 기준 범위)대로 계산됩니다. 입력 형식: 2026.02 (연.월)</p>
+    <p class="hint" style="margin-bottom:10px">· 실거래건수·실거래가격·전세월세 기간을 비워두면 기존 방식(건수: 최근 12개월 / 가격·전세월세: 위 기준 범위)대로 계산됩니다. 전세·월세는 하나의 기간을 함께 씁니다. 입력 형식: 2026.02 (연.월)</p>
     <div class="f" style="margin-top:4px"><label>내보낼 항목</label>
-      <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:13px;padding:6px 0">
-        <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="exp-sel-trade" checked>실거래가 (매매가·평당가)</label>
-        <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="exp-sel-ask" checked>시세 (호가·평당가)</label>
-        <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="exp-sel-kb" checked>KB시세 (시세·평당가)</label>
-        <span style="color:var(--bdr)">|</span>
-        <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="exp-sel-jeonse">전세<span style="color:var(--t3);font-size:11px">(오피스텔)</span></label>
-        <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="exp-sel-wolse">월세<span style="color:var(--t3);font-size:11px">(오피스텔)</span></label>
-        <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="exp-sel-yield">임대수익률<span style="color:var(--t3);font-size:11px">(오피스텔, 월세 함께 선택 필요)</span></label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;padding:10px;border:1px solid var(--bdr);border-radius:var(--r);background:var(--bg2)">
+        <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;padding:6px 10px;border:1px solid var(--bdr);border-radius:var(--r);background:var(--bg)"><input type="checkbox" id="exp-sel-trade" checked>실거래가 (매매가·평당가)</label>
+        <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;padding:6px 10px;border:1px solid var(--bdr);border-radius:var(--r);background:var(--bg)"><input type="checkbox" id="exp-sel-ask" checked>시세 (호가·평당가)</label>
+        <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;padding:6px 10px;border:1px solid var(--bdr);border-radius:var(--r);background:var(--bg)"><input type="checkbox" id="exp-sel-kb" checked>KB시세 (시세·평당가)</label>
+        <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;padding:6px 10px;border:1px solid var(--bdr);border-radius:var(--r);background:var(--bg)"><input type="checkbox" id="exp-sel-jeonse" checked>전세<span style="color:var(--t3);font-size:11px">(오피스텔)</span></label>
+        <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;padding:6px 10px;border:1px solid var(--bdr);border-radius:var(--r);background:var(--bg)"><input type="checkbox" id="exp-sel-wolse" checked>월세<span style="color:var(--t3);font-size:11px">(오피스텔)</span></label>
+        <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;padding:6px 10px;border:1px solid var(--bdr);border-radius:var(--r);background:var(--bg)"><input type="checkbox" id="exp-sel-yield" checked>임대수익률<span style="color:var(--t3);font-size:11px">(오피스텔, 월세 함께 선택 필요)</span></label>
       </div>
     </div>
     <div class="div"></div>
@@ -505,18 +511,20 @@ function calcYield(salePrice,convRent,stdDep){
 }
 // 타입별 수익률 계산 헬퍼
 // tradeM: 매매 실거래가 집계에만 쓰는 기간(엑셀 내보내기의 "실거래가격 기간" 커스텀 설정용).
-// 생략하면 recM과 동일하게 동작 — 전세/월세 기간(recM)에는 영향을 주지 않는다.
-function calcTypeYield(tn,recM,cid,askM,tradeM){
+// rentM: 전세·월세 집계에만 쓰는 기간(엑셀 내보내기의 "전세·월세 기간" 커스텀 설정용 — 전세와
+// 월세는 같은 항목으로 취급해 하나의 기간을 함께 쓴다). 둘 다 생략하면 recM과 동일하게 동작한다.
+function calcTypeYield(tn,recM,cid,askM,tradeM,rentM){
   const md=DB.marketData[cid];
   const tm=tradeM||recM;
+  const rm=rentM||recM;
   // 전세 평균
   let jPrices=[];
-  recM.forEach(m=>{(md?.[m]?.jeonse||[]).filter(j=>j.typeName===tn).forEach(j=>jPrices.push(j.price));});
+  rm.forEach(m=>{(md?.[m]?.jeonse||[]).filter(j=>j.typeName===tn).forEach(j=>jPrices.push(j.price));});
   const jsAvg=jPrices.length?jPrices.reduce((a,b)=>a+b,0)/jPrices.length:null;
 
   // 월세 데이터
   let wItems=[];
-  recM.forEach(m=>{(md?.[m]?.wolse||[]).filter(w=>w.typeName===tn).forEach(w=>wItems.push(w));});
+  rm.forEach(m=>{(md?.[m]?.wolse||[]).filter(w=>w.typeName===tn).forEach(w=>wItems.push(w));});
 
   // 매매가 (실거래→없으면 최신 호가 평균)
   let tradePrices=[];
@@ -2649,6 +2657,13 @@ function exportExcel(){
     customPriceMonths=buildMonthRange(priceFrom,priceTo);
     if(!customPriceMonths){showMsg('msg-exp','실거래가격 기간 형식이 올바르지 않습니다. (예: 2026.02~2026.07)','me');return;}
   }
+  const rentFrom=(document.getElementById('exp-rent-from').value||'').trim();
+  const rentTo=(document.getElementById('exp-rent-to').value||'').trim();
+  let customRentMonths=null;
+  if(rentFrom||rentTo){
+    customRentMonths=buildMonthRange(rentFrom,rentTo);
+    if(!customRentMonths){showMsg('msg-exp','전세·월세 기간 형식이 올바르지 않습니다. (예: 2026.02~2026.07)','me');return;}
+  }
   // 내보낼 항목 선택 — 전세/월세/임대수익률은 오피스텔 단지에만 적용된다.
   const selTrade=document.getElementById('exp-sel-trade').checked;
   const selAsk=document.getElementById('exp-sel-ask').checked;
@@ -2882,9 +2897,10 @@ function exportExcel(){
       const baseWord=oft?'전용평형기준':'공급평형기준';
       const allM=sortM(Object.keys(DB.marketData[cx.id]||{}));
       const recM=allM.slice(-rangeN);const last12=sheetFixed12;
-      // 실거래가격 기간을 직접 지정한 경우 그 기간을 쓰고, 아니면 기존처럼 기준 범위(recM)를 쓴다.
-      // 전세·월세 기간(recM)에는 영향을 주지 않는다.
+      // 실거래가격/전세·월세 기간을 직접 지정한 경우 그 기간을 쓰고, 아니면 기준 범위(recM)를 쓴다.
+      // 전세와 월세는 같은 항목으로 취급해 하나의 기간(rentM)을 함께 쓴다.
       const priceM=customPriceMonths||recM;
+      const rentM=customRentMonths||recM;
       const askM=latestM(cx.id,'asking');const kbM=latestM(cx.id,'kb');
       if(!allM.length)return;
       if(ci>0){pushRow([]);pushRow([]);pushRow([]);}
@@ -2898,7 +2914,7 @@ function exportExcel(){
         const ask=askM?(DB.marketData[cx.id]?.[askM]?.asking||[]).find(a=>a.typeName===tn):null;
         const kb=kbM?(DB.marketData[cx.id]?.[kbM]?.kb||[]).find(k=>k.typeName===tn):null;
         const askAvg=ask?(ask.lo&&ask.hi?(ask.lo+ask.hi)/2:(ask.lo||ask.hi)):null;
-        const yd=calcTypeYield(tn,recM,cx.id,askM,priceM);
+        const yd=calcTypeYield(tn,recM,cx.id,askM,priceM,rentM);
         return{t,tn,pyBase,dispPy,ts,ask,kb,askAvg,yd};
       });
       const wTrAvg=wtdPrice(TR,r=>r.ts?.avg||0);
