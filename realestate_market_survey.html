@@ -210,6 +210,19 @@ tbody tr:hover td{background:#f5f5f3}
       </div>
       <button class="btn btn-p" onclick="renderResult()"><i class="ti ti-search"></i>조회</button>
     </div>
+    <details>
+      <summary style="cursor:pointer;font-size:12px;color:var(--t2);font-weight:700;padding:4px 0"><i class="ti ti-adjustments"></i> 고급 설정 (호가·KB시세 기간)</summary>
+      <div class="row" style="align-items:flex-end;margin-top:8px">
+        <div class="f" style="max-width:230px"><label>호가·KB시세 기간 (선택, 비우면 당월)</label>
+          <div style="display:flex;gap:4px;align-items:center">
+            <input id="res-askkb-from" type="text" placeholder="2026.02" style="width:95px">
+            <span style="color:var(--t3)">~</span>
+            <input id="res-askkb-to" type="text" placeholder="2026.07" style="width:95px">
+          </div>
+        </div>
+      </div>
+      <p class="hint">· 비워두면 가장 최신 입력월(당월) 값 하나만 씁니다. 채우면 그 기간 평균으로 계산됩니다. 입력 형식: 2026.02 (연.월)</p>
+    </details>
   </div>
   <div id="res-area"></div>
 </div></div>
@@ -224,47 +237,54 @@ tbody tr:hover td{background:#f5f5f3}
       <div class="f" style="max-width:140px"><label>기준 범위 (기본값)</label>
         <select id="exp-range"><option value="3">최근 3개월</option><option value="6" selected>최근 6개월</option><option value="12">최근 12개월</option></select>
       </div>
-      <div class="f" style="max-width:230px"><label>실거래건수 기간 (선택, 최대 12개월)</label>
-        <div style="display:flex;gap:4px;align-items:center">
-          <input id="exp-cnt-from" type="text" placeholder="2026.02" style="width:95px">
-          <span style="color:var(--t3)">~</span>
-          <input id="exp-cnt-to" type="text" placeholder="2026.07" style="width:95px">
-        </div>
-      </div>
-      <div class="f" style="max-width:230px"><label>실거래가격 기간 (선택)</label>
-        <div style="display:flex;gap:4px;align-items:center">
-          <input id="exp-price-from" type="text" placeholder="2026.02" style="width:95px">
-          <span style="color:var(--t3)">~</span>
-          <input id="exp-price-to" type="text" placeholder="2026.07" style="width:95px">
-        </div>
-      </div>
-      <div class="f" style="max-width:230px"><label>전세·월세 기간 (선택)</label>
-        <div style="display:flex;gap:4px;align-items:center">
-          <input id="exp-rent-from" type="text" placeholder="2026.02" style="width:95px">
-          <span style="color:var(--t3)">~</span>
-          <input id="exp-rent-to" type="text" placeholder="2026.07" style="width:95px">
-        </div>
-      </div>
-      <div class="f" style="max-width:230px"><label>호가·KB시세 기간 (선택, 비우면 당월)</label>
-        <div style="display:flex;gap:4px;align-items:center">
-          <input id="exp-askkb-from" type="text" placeholder="2026.02" style="width:95px">
-          <span style="color:var(--t3)">~</span>
-          <input id="exp-askkb-to" type="text" placeholder="2026.07" style="width:95px">
-        </div>
-      </div>
-      <button class="btn btn-p" onclick="exportExcel()"><i class="ti ti-download"></i>엑셀 다운로드</button>
+      <button class="btn btn-p" id="exp-download-btn" onclick="exportExcel()"><i class="ti ti-download"></i>엑셀 다운로드</button>
     </div>
-    <p class="hint" style="margin-bottom:10px">· 실거래건수·실거래가격·전세월세 기간을 비워두면 기존 방식(건수: 최근 12개월 / 가격·전세월세: 위 기준 범위)대로 계산됩니다. 호가·KB시세 기간을 비워두면 기존처럼 가장 최신 입력월(당월) 값 하나만 씁니다 — 채우면 그 기간 평균으로 계산됩니다. 전세·월세, 호가·KB시세는 각각 하나의 기간을 함께 씁니다. 입력 형식: 2026.02 (연.월)</p>
-    <div class="f" style="margin-top:4px"><label>내보낼 항목</label>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;padding:10px;border:1px solid var(--bdr);border-radius:var(--r);background:var(--bg2)">
-        <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;padding:6px 10px;border:1px solid var(--bdr);border-radius:var(--r);background:var(--bg)"><input type="checkbox" id="exp-sel-trade" checked>실거래가 (매매가·평당가)</label>
-        <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;padding:6px 10px;border:1px solid var(--bdr);border-radius:var(--r);background:var(--bg)"><input type="checkbox" id="exp-sel-ask" checked>시세 (호가·평당가)</label>
-        <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;padding:6px 10px;border:1px solid var(--bdr);border-radius:var(--r);background:var(--bg)"><input type="checkbox" id="exp-sel-kb" checked>KB시세 (시세·평당가)</label>
-        <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;padding:6px 10px;border:1px solid var(--bdr);border-radius:var(--r);background:var(--bg)"><input type="checkbox" id="exp-sel-jeonse" checked>전세<span style="color:var(--t3);font-size:11px">(오피스텔)</span></label>
-        <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;padding:6px 10px;border:1px solid var(--bdr);border-radius:var(--r);background:var(--bg)"><input type="checkbox" id="exp-sel-wolse" checked>월세<span style="color:var(--t3);font-size:11px">(오피스텔)</span></label>
-        <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;padding:6px 10px;border:1px solid var(--bdr);border-radius:var(--r);background:var(--bg)"><input type="checkbox" id="exp-sel-yield" checked>임대수익률<span style="color:var(--t3);font-size:11px">(오피스텔, 월세 함께 선택 필요)</span></label>
+    <details style="margin-bottom:10px">
+      <summary style="cursor:pointer;font-size:12px;color:var(--t2);font-weight:700;padding:4px 0"><i class="ti ti-adjustments"></i> 고급 설정 (기간·내보낼 항목 조정)</summary>
+      <div style="margin-top:8px">
+        <div class="row" style="align-items:flex-end">
+          <div class="f" style="max-width:230px"><label>실거래건수 기간 (선택, 최대 12개월)</label>
+            <div style="display:flex;gap:4px;align-items:center">
+              <input id="exp-cnt-from" type="text" placeholder="2026.02" style="width:95px">
+              <span style="color:var(--t3)">~</span>
+              <input id="exp-cnt-to" type="text" placeholder="2026.07" style="width:95px">
+            </div>
+          </div>
+          <div class="f" style="max-width:230px"><label>실거래가격 기간 (선택)</label>
+            <div style="display:flex;gap:4px;align-items:center">
+              <input id="exp-price-from" type="text" placeholder="2026.02" style="width:95px">
+              <span style="color:var(--t3)">~</span>
+              <input id="exp-price-to" type="text" placeholder="2026.07" style="width:95px">
+            </div>
+          </div>
+          <div class="f" style="max-width:230px"><label>전세·월세 기간 (선택)</label>
+            <div style="display:flex;gap:4px;align-items:center">
+              <input id="exp-rent-from" type="text" placeholder="2026.02" style="width:95px">
+              <span style="color:var(--t3)">~</span>
+              <input id="exp-rent-to" type="text" placeholder="2026.07" style="width:95px">
+            </div>
+          </div>
+          <div class="f" style="max-width:230px"><label>호가·KB시세 기간 (선택, 비우면 당월)</label>
+            <div style="display:flex;gap:4px;align-items:center">
+              <input id="exp-askkb-from" type="text" placeholder="2026.02" style="width:95px">
+              <span style="color:var(--t3)">~</span>
+              <input id="exp-askkb-to" type="text" placeholder="2026.07" style="width:95px">
+            </div>
+          </div>
+        </div>
+        <p class="hint" style="margin-bottom:10px">· 실거래건수·실거래가격·전세월세 기간을 비워두면 기존 방식(건수: 최근 12개월 / 가격·전세월세: 위 기준 범위)대로 계산됩니다. 호가·KB시세 기간을 비워두면 기존처럼 가장 최신 입력월(당월) 값 하나만 씁니다 — 채우면 그 기간 평균으로 계산됩니다. 전세·월세, 호가·KB시세는 각각 하나의 기간을 함께 씁니다. 입력 형식: 2026.02 (연.월)</p>
+        <div class="f" style="margin-top:4px"><label>내보낼 항목</label>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;padding:10px;border:1px solid var(--bdr);border-radius:var(--r);background:var(--bg2)">
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;padding:6px 10px;border:1px solid var(--bdr);border-radius:var(--r);background:var(--bg)"><input type="checkbox" id="exp-sel-trade" checked>실거래가 (매매가·평당가)</label>
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;padding:6px 10px;border:1px solid var(--bdr);border-radius:var(--r);background:var(--bg)"><input type="checkbox" id="exp-sel-ask" checked>시세 (호가·평당가)</label>
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;padding:6px 10px;border:1px solid var(--bdr);border-radius:var(--r);background:var(--bg)"><input type="checkbox" id="exp-sel-kb" checked>KB시세 (시세·평당가)</label>
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;padding:6px 10px;border:1px solid var(--bdr);border-radius:var(--r);background:var(--bg)"><input type="checkbox" id="exp-sel-jeonse" checked>전세<span style="color:var(--t3);font-size:11px">(오피스텔)</span></label>
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;padding:6px 10px;border:1px solid var(--bdr);border-radius:var(--r);background:var(--bg)"><input type="checkbox" id="exp-sel-wolse" checked>월세<span style="color:var(--t3);font-size:11px">(오피스텔)</span></label>
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;padding:6px 10px;border:1px solid var(--bdr);border-radius:var(--r);background:var(--bg)"><input type="checkbox" id="exp-sel-yield" checked>임대수익률<span style="color:var(--t3);font-size:11px">(오피스텔, 월세 함께 선택 필요)</span></label>
+          </div>
+        </div>
       </div>
-    </div>
+    </details>
     <div class="div"></div>
     <div class="sec">내보낼 단지 선택</div>
     <div style="display:flex;gap:8px;margin-bottom:8px">
@@ -357,7 +377,8 @@ function refreshLuBadge(cid,key){
   }
 }
 function saveDB(){
-  try{localStorage.setItem('reDB_v4',JSON.stringify(DB));}catch(e){alert('저장 공간 부족');}
+  try{localStorage.setItem('reDB_v4',JSON.stringify(DB));}
+  catch(e){alert('저장 공간이 부족해 방금 입력한 내용이 저장되지 않았습니다.\n\n"내보내기" 탭에서 DB를 백업(JSON)한 뒤, 더 이상 필요 없는 오래된 월 데이터를 정리하면 공간을 확보할 수 있습니다.');}
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -720,6 +741,17 @@ function saveCx(){
   const regHid=document.getElementById('c-region');if(regHid)regHid.value=region;
   const name=document.getElementById('c-name').value.trim();
   if(!region||!name){showMsg('msg-cx','지역과 단지명은 필수입니다.','me');return;}
+  // 타입명이 중복(빈 값끼리 중복 포함)되면 호가/KB시세 입력칸 id가 겹쳐 뒤쪽 타입의 입력이
+  // 무시되므로, 저장 전에 걸러낸다.
+  {
+    const seen={};
+    for(const r of typeRows){
+      const tn=(r.typeName||'').toString().trim();
+      if(seen[tn]){showMsg('msg-cx','타입명이 중복되었습니다'+(tn?' ("'+tn+'")':' (빈 타입명 2개 이상)')+'. 타입명을 다르게 입력해 주세요.','me');return;}
+      seen[tn]=true;
+    }
+  }
+  const existingCx=editCxId?DB.complexes.find(c=>c.id===editCxId):null;
   const cx={
     id:editCxId||('cx'+Date.now()),region,name,
     type:document.getElementById('c-type').value,
@@ -736,6 +768,9 @@ function saveCx(){
       units:parseInt(r.units)||0
     }))
   };
+  // 기존 단지를 수정 저장할 때 항목별 "최신 입력" 타임스탬프(lastUpdate)가 새 객체 교체로
+  // 사라지지 않도록 그대로 옮겨온다.
+  if(existingCx&&existingCx.lastUpdate)cx.lastUpdate=existingCx.lastUpdate;
   if(editCxId){const i=DB.complexes.findIndex(c=>c.id===editCxId);if(i>=0)DB.complexes[i]=cx;}
   else DB.complexes.push(cx);
   editCxId=cx.id;
@@ -1251,21 +1286,55 @@ function stab(btn,tabId){
 }
 
 // ═══════════════════════════════════════════════════════════
+// 실거래가·전세·월세 CRUD 공통 헬퍼 — 매매(trades)와 전세(jeonse)는 "타입+가격 하나+층+계약일"로
+// 구조가 완전히 같아 add/수정을 공유한다. 월세(wolse)는 보증금·월세 두 값을 받아 구조가 달라
+// 별도로 둔다. 삭제·수정행 열기/닫기는 세 종류 모두 prefix만 다르므로 공통화한다.
+// ═══════════════════════════════════════════════════════════
+function addSinglePriceEntry(cfg,cid,month){
+  const typeName=document.getElementById(cfg.selId).value;
+  const price=parseFloat(document.getElementById(cfg.priceId).value);
+  const floor=parseInt(document.getElementById(cfg.floorId).value)||null;
+  const date=toDateKey(document.getElementById(cfg.dateId)?.value);
+  if(!price||price<=0){showMsg('msg-inp',cfg.priceLabel+'를 입력해 주세요.','me');return;}
+  DB.marketData[cid][month][cfg.dataKey].push({typeName,price,floor,date,ts:Date.now()});
+  touchLastUpdate(cid,cfg.dataKey);
+  saveDB();
+  refreshLuBadge(cid,cfg.dataKey);
+  document.getElementById(cfg.priceId).value='';document.getElementById(cfg.floorId).value='';
+  showMsg('msg-inp',cfg.doneMsgPrefix+'완료 ('+price.toLocaleString()+'천원)','ms');
+  cfg.renderFn(cid,month);
+}
+function saveSinglePriceEdit(cfg,cid,month,i){
+  const nt=document.getElementById(cfg.ep+'-type-'+i).value;
+  const np=parseFloat(document.getElementById(cfg.ep+'-price-'+i).value);
+  const nf=parseInt(document.getElementById(cfg.ep+'-floor-'+i).value)||null;
+  const ndRaw=document.getElementById(cfg.ep+'-date-'+i)?.value;
+  const ndate=ndRaw?ndRaw.replace(/-/g,''):null;
+  if(!np||np<=0){alert(cfg.priceLabel+'를 입력해 주세요.');return;}
+  const t=DB.marketData[cid][month][cfg.dataKey][i];
+  t.typeName=nt;t.price=np;t.floor=nf;t.date=ndate;
+  saveDB();cfg.renderFn(cid,month);showMsg('msg-inp','수정 완료','ms');
+}
+function assetDel(cid,month,i,dataKey,label,renderFn){
+  if(!confirm('이 '+label+' 삭제하시겠습니까?'))return;
+  DB.marketData[cid][month][dataKey].splice(i,1);
+  saveDB();renderFn(cid,month);showMsg('msg-inp','삭제됨','ms');
+}
+function assetStartEdit(pre,i){
+  const row=document.getElementById(pre+'-row-'+i);const edit=document.getElementById(pre+'-edit-'+i);
+  if(row)row.style.background='var(--bg2)';if(edit)edit.style.display='table-row';
+}
+function assetCancelEdit(pre,i){
+  const row=document.getElementById(pre+'-row-'+i);const edit=document.getElementById(pre+'-edit-'+i);
+  if(row)row.style.background='';if(edit)edit.style.display='none';
+}
+
+// ═══════════════════════════════════════════════════════════
 // 실거래가 CRUD
 // ═══════════════════════════════════════════════════════════
 function addTrade(cid,month){
-  const typeName=document.getElementById('tr-sel').value;
-  const price=parseFloat(document.getElementById('tr-price').value);
-  const floor=parseInt(document.getElementById('tr-floor').value)||null;
-  const date=toDateKey(document.getElementById('tr-date')?.value);
-  if(!price||price<=0){showMsg('msg-inp','거래가를 입력해 주세요.','me');return;}
-  DB.marketData[cid][month].trades.push({typeName,price,floor,date,ts:Date.now()});
-  touchLastUpdate(cid,'trades');
-  saveDB();
-  refreshLuBadge(cid,'trades');
-  document.getElementById('tr-price').value='';document.getElementById('tr-floor').value='';
-  showMsg('msg-inp','추가 완료 ('+price.toLocaleString()+'천원)','ms');
-  renderTradeList(cid,month);
+  addSinglePriceEntry({selId:'tr-sel',priceId:'tr-price',floorId:'tr-floor',dateId:'tr-date',
+    dataKey:'trades',priceLabel:'거래가',doneMsgPrefix:'추가 ',renderFn:renderTradeList},cid,month);
 }
 function renderTradeList(cid,month){
   const el=document.getElementById('tr-list');if(!el)return;
@@ -1308,41 +1377,19 @@ function renderTradeList(cid,month){
     '<div style="font-size:11px;color:var(--t3);margin-top:6px">✏️ 수정 버튼 → 타입·가격·층·계약일 변경 후 저장</div>';
   trades.forEach(function(t,i){var s=document.getElementById('et-type-'+i);if(s)s.value=t.typeName;});
 }
-function startEdit(i){document.getElementById('tr-row-'+i).style.background='var(--bg2)';document.getElementById('tr-edit-'+i).style.display='table-row';}
-function cancelEdit(i){document.getElementById('tr-row-'+i).style.background='';document.getElementById('tr-edit-'+i).style.display='none';}
+function startEdit(i){assetStartEdit('tr',i);}
+function cancelEdit(i){assetCancelEdit('tr',i);}
 function saveEdit(cid,month,i){
-  const nt=document.getElementById('et-type-'+i).value;
-  const np=parseFloat(document.getElementById('et-price-'+i).value);
-  const nf=parseInt(document.getElementById('et-floor-'+i).value)||null;
-  const ndRaw=document.getElementById('et-date-'+i)?.value;
-  const ndate=ndRaw?ndRaw.replace(/-/g,''):null;
-  if(!np||np<=0){alert('거래가를 입력해 주세요.');return;}
-  const t=DB.marketData[cid][month].trades[i];
-  t.typeName=nt;t.price=np;t.floor=nf;t.date=ndate;
-  saveDB();renderTradeList(cid,month);showMsg('msg-inp','수정 완료','ms');
+  saveSinglePriceEdit({ep:'et',dataKey:'trades',priceLabel:'거래가',renderFn:renderTradeList},cid,month,i);
 }
-function delTrade(cid,month,i){
-  if(!confirm('이 거래를 삭제하시겠습니까?'))return;
-  DB.marketData[cid][month].trades.splice(i,1);
-  saveDB();renderTradeList(cid,month);showMsg('msg-inp','삭제됨','ms');
-}
+function delTrade(cid,month,i){assetDel(cid,month,i,'trades','거래를',renderTradeList);}
 
 // ═══════════════════════════════════════════════════════════
 // 전세 CRUD
 // ═══════════════════════════════════════════════════════════
 function addJeonse(cid,month){
-  const typeName=document.getElementById('js-sel').value;
-  const price=parseFloat(document.getElementById('js-price').value);
-  const floor=parseInt(document.getElementById('js-floor').value)||null;
-  const date=toDateKey(document.getElementById('js-date')?.value);
-  if(!price||price<=0){showMsg('msg-inp','전세가를 입력해 주세요.','me');return;}
-  DB.marketData[cid][month].jeonse.push({typeName,price,floor,date,ts:Date.now()});
-  touchLastUpdate(cid,'jeonse');
-  saveDB();
-  refreshLuBadge(cid,'jeonse');
-  document.getElementById('js-price').value='';document.getElementById('js-floor').value='';
-  showMsg('msg-inp','전세 추가 완료 ('+price.toLocaleString()+'천원)','ms');
-  renderJeonseList(cid,month);
+  addSinglePriceEntry({selId:'js-sel',priceId:'js-price',floorId:'js-floor',dateId:'js-date',
+    dataKey:'jeonse',priceLabel:'전세가',doneMsgPrefix:'전세 추가 ',renderFn:renderJeonseList},cid,month);
 }
 function renderJeonseList(cid,month){
   const el=document.getElementById('js-list');if(!el)return;
@@ -1383,24 +1430,12 @@ function renderJeonseList(cid,month){
     '<div class="tw"><table><thead><tr><th>#</th><th>타입</th><th>전세가(천)</th><th>층</th><th>계약일</th><th>수정</th><th>삭제</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
   items.forEach(function(t,i){var s=document.getElementById('jt-type-'+i);if(s)s.value=t.typeName;});
 }
-function startEditJs(i){document.getElementById('js-row-'+i).style.background='var(--bg2)';document.getElementById('js-edit-'+i).style.display='table-row';}
-function cancelEditJs(i){document.getElementById('js-row-'+i).style.background='';document.getElementById('js-edit-'+i).style.display='none';}
+function startEditJs(i){assetStartEdit('js',i);}
+function cancelEditJs(i){assetCancelEdit('js',i);}
 function saveEditJs(cid,month,i){
-  const nt=document.getElementById('jt-type-'+i).value;
-  const np=parseFloat(document.getElementById('jt-price-'+i).value);
-  const nf=parseInt(document.getElementById('jt-floor-'+i).value)||null;
-  const ndRaw=document.getElementById('jt-date-'+i)?.value;
-  const ndate=ndRaw?ndRaw.replace(/-/g,''):null;
-  if(!np||np<=0){alert('전세가를 입력해 주세요.');return;}
-  const t=DB.marketData[cid][month].jeonse[i];
-  t.typeName=nt;t.price=np;t.floor=nf;t.date=ndate;
-  saveDB();renderJeonseList(cid,month);showMsg('msg-inp','수정 완료','ms');
+  saveSinglePriceEdit({ep:'jt',dataKey:'jeonse',priceLabel:'전세가',renderFn:renderJeonseList},cid,month,i);
 }
-function delJeonse(cid,month,i){
-  if(!confirm('이 전세 건을 삭제하시겠습니까?'))return;
-  DB.marketData[cid][month].jeonse.splice(i,1);
-  saveDB();renderJeonseList(cid,month);showMsg('msg-inp','삭제됨','ms');
-}
+function delJeonse(cid,month,i){assetDel(cid,month,i,'jeonse','전세 건을',renderJeonseList);}
 
 // ═══════════════════════════════════════════════════════════
 // 월세 CRUD
@@ -1462,8 +1497,8 @@ function renderWolseList(cid,month){
     '<div class="tw"><table><thead><tr><th>#</th><th>타입</th><th>보증금(천)</th><th>월세(천)</th><th>층</th><th>계약일</th><th>수정</th><th>삭제</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
   items.forEach(function(t,i){var s=document.getElementById('wt-type-'+i);if(s)s.value=t.typeName;});
 }
-function startEditWs(i){document.getElementById('ws-row-'+i).style.background='var(--bg2)';document.getElementById('ws-edit-'+i).style.display='table-row';}
-function cancelEditWs(i){document.getElementById('ws-row-'+i).style.background='';document.getElementById('ws-edit-'+i).style.display='none';}
+function startEditWs(i){assetStartEdit('ws',i);}
+function cancelEditWs(i){assetCancelEdit('ws',i);}
 function saveEditWs(cid,month,i){
   const nt=document.getElementById('wt-type-'+i).value;
   const nd=parseFloat(document.getElementById('wt-dep-'+i).value);
@@ -1476,11 +1511,7 @@ function saveEditWs(cid,month,i){
   t.typeName=nt;t.deposit=nd||0;t.rent=nr;t.floor=nf;t.date=ndate;
   saveDB();renderWolseList(cid,month);showMsg('msg-inp','수정 완료','ms');
 }
-function delWolse(cid,month,i){
-  if(!confirm('이 월세 건을 삭제하시겠습니까?'))return;
-  DB.marketData[cid][month].wolse.splice(i,1);
-  saveDB();renderWolseList(cid,month);showMsg('msg-inp','삭제됨','ms');
-}
+function delWolse(cid,month,i){assetDel(cid,month,i,'wolse','월세 건을',renderWolseList);}
 
 // ═══════════════════════════════════════════════════════════
 // 호가 / KB / 거래건수 저장
@@ -2209,6 +2240,14 @@ function renderResult(){
   if(!recM.length){area.innerHTML='<div class="card"><div class="empty">입력된 데이터가 없습니다.</div></div>';return;}
   const askM=latestM(cid,'asking');const kbM=latestM(cid,'kb');
   const lastM=recM[recM.length-1];
+  const askKbFrom=(document.getElementById('res-askkb-from')?.value||'').trim();
+  const askKbTo=(document.getElementById('res-askkb-to')?.value||'').trim();
+  let customAskKbMonths=null;
+  if(askKbFrom||askKbTo){
+    customAskKbMonths=buildMonthRange(askKbFrom,askKbTo);
+    if(!customAskKbMonths){area.innerHTML='<div class="card"><div class="empty">호가·KB시세 기간 형식이 올바르지 않습니다. (예: 2026.02~2026.07)</div></div>';return;}
+  }
+  const askKbLabel=customAskKbMonths?(customAskKbMonths[0]+'~'+customAskKbMonths[customAskKbMonths.length-1]+' 평균'):null;
 
   // 거래건수
   let totTr=0,totJs=0,totWs=0;
@@ -2236,8 +2275,16 @@ function renderResult(){
     var trades=[];
     recM.forEach(function(m){var md=DB.marketData[cid][m];if(md)trades.push(...md.trades.filter(function(tr){return tr.typeName===tn;}));});
     var ts=calcStats(trades);
-    var ask=askM?(DB.marketData[cid][askM]?.asking||[]).find(function(a){return a.typeName===tn;}):null;
-    var kb=kbM?(DB.marketData[cid][kbM]?.kb||[]).find(function(k){return k.typeName===tn;}):null;
+    var ask,kb;
+    if(customAskKbMonths){
+      var lohi=collectAskLoHiAcrossMonths(cid,tn,customAskKbMonths);
+      ask=(lohi.lo!=null||lohi.hi!=null)?{lo:lohi.lo,hi:lohi.hi,cnt:null}:null;
+      var kbAvgVal=collectKbAvgAcrossMonths(cid,tn,customAskKbMonths);
+      kb=kbAvgVal!=null?{avg:kbAvgVal}:null;
+    } else {
+      ask=askM?(DB.marketData[cid][askM]?.asking||[]).find(function(a){return a.typeName===tn;}):null;
+      kb=kbM?(DB.marketData[cid][kbM]?.kb||[]).find(function(k){return k.typeName===tn;}):null;
+    }
     var askAvg=ask?(ask.lo&&ask.hi?(ask.lo+ask.hi)/2:(ask.lo||ask.hi)):null;
     var yd=calcTypeYield(tn,recM,cid,askM);
     return{t,tn,pyBase,dispPy,ts,ask,kb,askAvg,yd};
@@ -2520,7 +2567,7 @@ function renderResult(){
     '<span class="badge '+(oft?'bo':'ba')+'" style="margin-left:5px">'+cx.type+'</span>'+
     '<div style="font-size:11px;color:var(--t2);margin-top:3px">'+
     cx.region+' · 실거래: '+recM[0]+'~'+lastM+' ('+rangeN+'개월)'+
-    (askM?' · 호가: '+askM+' 기준':'')+(kbM?' · KB: '+kbM+' 기준':'')+
+    (askKbLabel?' · 호가·KB: '+askKbLabel+' 기준':((askM?' · 호가: '+askM+' 기준':'')+(kbM?' · KB: '+kbM+' 기준':'')))+
     ' · 평당가 기준: '+(oft?'전용':'공급')+'평형</div></div></div>'+
     '<div class="metrics">'+
     '<div class="metric"><div class="v">'+totUnits.toLocaleString()+'</div><div class="l">총 '+unitLabel+'수</div></div>'+
@@ -2534,8 +2581,8 @@ function renderResult(){
     '<thead><tr>'+
     '<th rowspan="2">타입</th><th rowspan="2">전용(평)</th><th rowspan="2">'+sqmLabel+'</th><th rowspan="2">'+unitLabel+'수</th>'+
     '<th colspan="5" class="th-tr">실거래가 ('+rangeN+'개월, 천원)</th>'+
-    '<th colspan="5" class="th-ask">호가 ('+(askM||'-')+', 천원)</th>'+
-    '<th colspan="2" class="th-kb">KB시세 ('+(kbM||'-')+', 천원)</th>'+
+    '<th colspan="5" class="th-ask">호가 ('+(askKbLabel||askM||'-')+', 천원)</th>'+
+    '<th colspan="2" class="th-kb">KB시세 ('+(askKbLabel||kbM||'-')+', 천원)</th>'+
     '</tr><tr>'+
     '<th class="th-tr">최저</th><th class="th-tr">최고</th><th class="th-tr">평균</th><th class="th-tr">평당가</th><th class="th-tr">건수</th>'+
     '<th class="th-ask">최저</th><th class="th-ask">최고</th><th class="th-ask">평균</th><th class="th-ask">평당가</th><th class="th-ask">매물건수</th>'+
@@ -2664,9 +2711,35 @@ function collectKbAvgAcrossMonths(cid,tn,months){
     const k=(DB.marketData[cid]?.[m]?.kb||[]).find(function(x){return x.typeName===tn;});
     if(k&&k.avg!=null)vals.push(k.avg);
   });
-  return vals.length?vals.reduce(function(s,v){return s+v;},0)/vals.length:null;
+  // 원본 kb.avg는 항상 정수(사용자가 직접 입력한 값)이므로, 여기서도 반올림해 다른 정수
+  // 필드들과 일관되게 맞춘다 (그렇지 않으면 화면에 소수점이 그대로 노출된다).
+  return vals.length?Math.round(vals.reduce(function(s,v){return s+v;},0)/vals.length):null;
 }
+// 결과조회 화면은 호가를 최저/최고 두 값으로 그대로 보여주므로(엑셀처럼 평균 한 값으로
+// 합치지 않음), 커스텀 기간 지정 시 최저·최고를 각각 그 기간의 평균으로 계산한다.
+function collectAskLoHiAcrossMonths(cid,tn,months){
+  const los=[],his=[];
+  months.forEach(function(m){
+    const a=(DB.marketData[cid]?.[m]?.asking||[]).find(function(x){return x.typeName===tn;});
+    if(a){if(a.lo)los.push(a.lo);if(a.hi)his.push(a.hi);}
+  });
+  return{
+    lo:los.length?Math.round(los.reduce(function(s,v){return s+v;},0)/los.length):null,
+    hi:his.length?Math.round(his.reduce(function(s,v){return s+v;},0)/his.length):null
+  };
+}
+// 버튼을 "생성 중..."으로 바꾸고 한 틱 뒤(레이아웃 반영 후) 실제 내보내기를 실행 —
+// 단지가 많을 때 버튼 클릭 후 화면이 멈춘 것처럼 보이지 않도록 최소한의 진행 표시를 준다.
 function exportExcel(){
+  const btn=document.getElementById('exp-download-btn');
+  const orig=btn?btn.innerHTML:null;
+  if(btn){btn.disabled=true;btn.innerHTML='<i class="ti ti-loader-2"></i>생성 중...';}
+  setTimeout(function(){
+    try{_exportExcelRun();}
+    finally{if(btn){btn.disabled=false;btn.innerHTML=orig;}}
+  },30);
+}
+function _exportExcelRun(){
   const rangeN=parseInt(document.getElementById('exp-range').value)||6;
   const cntFrom=(document.getElementById('exp-cnt-from').value||'').trim();
   const cntTo=(document.getElementById('exp-cnt-to').value||'').trim();
@@ -3307,7 +3380,11 @@ function impDB(e){
   const r=new FileReader();
   r.onload=function(ev){
     try{
-      DB=JSON.parse(ev.target.result);
+      const parsed=JSON.parse(ev.target.result);
+      const curCnt=DB.complexes.length;
+      const newCnt=(parsed.complexes||[]).length;
+      if(!confirm('현재 저장된 단지 '+curCnt+'개를 백업 파일의 단지 '+newCnt+'개로 완전히 덮어씁니다.\n되돌릴 수 없습니다. 계속하시겠습니까?'))return;
+      DB=parsed;
       migrateToCheonwon(); // 만원 단위로 저장된 옛 백업을 복원하는 경우 대비
       saveDB();initSels();renderCxList();renderExpList();
       // 복원 후 첫 단지 자동 선택 → loadInputForm 호출로 luBadge/계약일 즉시 표시
