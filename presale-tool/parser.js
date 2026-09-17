@@ -366,12 +366,13 @@
     // 앞/뒤에 붙어 있다는 구조적 전제 하에 탐색 범위를 좁힌다.
     var codeSearchEnd = Math.min(toks.length, firstFloatIdx + 2);
     var code = null;
+    var codeIdx = -1;
     for (var t = 0; t < codeSearchEnd; t++) {
-      if (SHORT_CODE_RE.test(toks[t])) { code = toks[t]; break; }
+      if (SHORT_CODE_RE.test(toks[t])) { code = toks[t]; codeIdx = t; break; }
     }
     if (!code) {
       for (var t2 = 0; t2 < codeSearchEnd; t2++) {
-        if (LONG_CODE_RE.test(toks[t2])) { code = toks[t2]; break; }
+        if (LONG_CODE_RE.test(toks[t2])) { code = toks[t2]; codeIdx = t2; break; }
       }
     }
     // 코드가 순수 정수형(예: "36 13 36.9234...")이고 세그먼트 맨 앞이 코드 자신인 경우 -
@@ -382,21 +383,31 @@
     // (세대수가 코드보다 float에 더 가까이 붙어 있는 "코드-세대수-면적" 순서 문서에서 실측).
     if (!code && /^\d{2,3}$/.test(toks[0]) && floats.some(function (f) { return Math.floor(f.v) === Number(toks[0]); })) {
       code = toks[0];
+      codeIdx = 0;
     }
     if (!code) {
       var adj = [toks[firstFloatIdx - 1], toks[firstFloatIdx + 1]].filter(Boolean);
       for (var ai = 0; ai < adj.length; ai++) {
-        if (/^\d{2,3}$/.test(adj[ai]) && Number(adj[ai]) < 1000) { code = adj[ai]; break; }
+        if (/^\d{2,3}$/.test(adj[ai]) && Number(adj[ai]) < 1000) {
+          code = adj[ai];
+          codeIdx = (ai === 0) ? firstFloatIdx - 1 : firstFloatIdx + 1;
+          break;
+        }
       }
     }
     if (!code) return null;
 
     // 세대수: 면적값 뒤에 오는 정수 중 첫 번째(총공급세대수, 그 뒤로 특별공급 등 세부내역이 이어짐).
     // 면적값 뒤에 정수가 전혀 없으면(세대수가 코드 바로 앞에 오는 오피스텔 "코드+세대수 먼저"형)
-    // 면적값 앞의 마지막 정수를 사용한다.
+    // 면적값 앞의 정수를 쓰되, 코드 자신이 순수 정수라 ints에 코드 자신도 함께 잡힌 경우
+    // (예: "36 13 36.9234..." - 36은 코드 자신, 13이 진짜 세대수) 코드 자신의 자리는
+    // 제외한다. 코드 앞에 세대수와 동(건물)번호가 함께 오는 문서는 항상 "세대수, 동" 순서로
+    // 코드 바로 뒤에 붙으므로(실사례: 푸르지오 스타셀라49 오피스텔 - "114C1 90 101"에서
+    // 90이 세대수, 101은 동번호. 기존엔 면적값 앞 "마지막" 정수를 집어 101을 세대수로
+    // 잘못 채택했다), 코드 자신을 제외한 후보들 중 코드에 가장 가까운(=첫 번째) 정수를 쓴다.
     var intsAfter = ints.filter(function (x) { return x.idx > maxFloatIdx && x.v < 1000; });
-    var intsBefore = ints.filter(function (x) { return x.idx < firstFloatIdx && x.v < 1000; });
-    var supply_units = intsAfter.length ? intsAfter[0].v : (intsBefore.length ? intsBefore[intsBefore.length - 1].v : NaN);
+    var intsBefore = ints.filter(function (x) { return x.idx < firstFloatIdx && x.v < 1000 && x.idx !== codeIdx; });
+    var supply_units = intsAfter.length ? intsAfter[0].v : (intsBefore.length ? intsBefore[0].v : NaN);
     if (!isFinite(supply_units)) return null;
 
     // 전용/공급면적: 1) 우선 "전용+공용=소계" 산술 관계를 면적값들 사이에서 직접 찾는다(코드가
@@ -1277,8 +1288,21 @@
     return out;
   }
 
+  // "14~32층최고"처럼 층 범위와 바로 뒤따르는 "최고"/"최저" 라벨 사이에 공백이 아예
+  // 없이 붙어버리는 경우가 있다(실사례: 푸르지오 스타셀라49 오피스텔 - 같은 문서
+  // 안에서도 "2~13층 최고"(공백 있음)와 "14~32층최고"(공백 없음)가 섞여 있다 -
+  // 표 칸 폭 차이로 pdf.js 재구성 시 우연히 공백이 생기거나 없어진 것으로 보인다).
+  // 붙어 있으면 이 층 범위 토큰 전체가 "최고"까지 포함해 하나로 인식되고, 그 다음
+  // "최저" 행이 이 오염된 층 범위("14~32층최고")에 그대로 이어붙어(pushRow가 이미
+  // "최고"/"최저" 라벨을 층 범위 뒤에 붙이므로) "14~32층최고 최저"처럼 라벨이
+  // 중복되는 2차 오염까지 발생한다. 소계/합계 자체(세대수·금액)에는 영향이 없지만
+  // G열(층별) 표시가 틀리므로, 공백을 강제로 넣어 일반 케이스와 동일하게 만든다.
+  function fixGluedFloorTierLabel(text) {
+    return text.replace(/층(최고|최저)/g, '층 $1');
+  }
+
   function parsePriceSection(text, codes, baseDate) {
-    text = fixGluedNumbers(despaceKeywords(String(text || '')));
+    text = fixGluedFloorTierLabel(fixGluedNumbers(despaceKeywords(String(text || ''))));
     var hdr = parseTableHeader(text, baseDate);
     var unit_mult = hdr.unit_mult;
     var codeSet = codes && codes.length ? codes.slice() : null;
@@ -2035,7 +2059,27 @@
 
     var resumeEnd = findNextHeadingBoundary(searchText, resumeIdx);
     if (resumeEnd < 0) resumeEnd = searchText.length;
-    var continuation = searchText.slice(resumeIdx, resumeEnd).trim();
+    // 끊긴 지점과 층 표기 재개 지점 "사이"에 새 코드의 헤더(코드+동/호 등)가 먼저 오고
+    // 그 다음에야 층 표기가 시작되는 문서가 있다(실사례: 푸르지오 스타셀라49 오피스텔 -
+    // "...합니다.\n2군118B\n118B1 90\n1호,\n6호\n2~12층 최고..."처럼 긴 안내문 뒤에 새
+    // 코드 헤더가 오고, RESUME_RE는 층 표기 줄만 찾으므로 이 헤더를 건너뛴다. 그러면
+    // 이어붙인 데이터에 코드 표시가 없어 직전 코드(여기선 114C2)에 잘못 흡수된다).
+    // 재개 지점 바로 앞 구간에서 area 코드가 마지막으로 등장하는 위치를 찾아, 있으면
+    // 거기서부터(코드 헤더 포함) 이어붙인다.
+    // "■ 특별공급 공급세대수" 같은 코드 재나열 매핑표(디코이, 2-2절 참고)가 끼어드는
+    // 문서도 있어(실사례: 진월동지역주택조합), 코드 문자열이 gap 안에 있다고 무조건
+    // 헤더로 보면 안 된다 - 디코이 표 안의 우연한 코드 언급은 재개 지점(resumeIdx)과
+    // 멀리 떨어져 있으므로, "재개 지점 바로 앞(짧은 거리 안)"에 있을 때만 진짜 헤더로
+    // 인정한다(코드+세대수+동/호 몇 토큰 정도의 간격 - 80자 이내).
+    var HEADER_GAP_MAX = 80;
+    var gapText = searchText.slice(0, resumeIdx);
+    var lastCodeIdx = -1;
+    areaCodes.forEach(function (c) {
+      var idx = gapText.lastIndexOf(c);
+      if (idx > lastCodeIdx) lastCodeIdx = idx;
+    });
+    var continuationStart = (lastCodeIdx >= 0 && (resumeIdx - lastCodeIdx) <= HEADER_GAP_MAX) ? lastCodeIdx : resumeIdx;
+    var continuation = searchText.slice(continuationStart, resumeEnd).trim();
     if (!continuation) return null;
 
     var merged = (priceText + '\n' + continuation).trim();
@@ -2080,6 +2124,18 @@
     var RESUME_RE = /^[ \t]*(\d+(?:~\d+)?[ \t]*층|기준층|최상층|최하층)[^\d\n]*\d/;
     var lines = mergeWrappedFloorLines(fullText.slice(priceEndIdx, searchEnd).split('\n'), RESUME_RE);
     var extraLines = lines.filter(function (line) { return RESUME_RE.test(line); });
+    if (!extraLines.length) return null;
+    // 세대수 컬럼이 아예 없어 모든 행이 fallback(1)인 문서는 실제 세대수(90/101 등)와의
+    // 합계 비교가 구조적으로 항상 "미달"로 나온다(6행×1=6은 언제나 실제 세대수보다
+    // 작음). 이런 문서에서 repairFragmentedPriceTable이 이미 안내문 뒤에서 이어붙인
+    // 구간을 이 함수가 priceEndIdx(안내문이 끼기 전 지점)부터 다시 훑으면, 이미
+    // priceText에 들어가 있는 바로 그 층 행들을 "새로 찾은 부족분"으로 착각해 중복으로
+    // 또 이어붙인다(실사례: 푸르지오 스타셀라49 오피스텔 - 마지막 코드 119A2가 6행이
+    // 아니라 18행으로 부풀려짐). priceText에 이미 같은 텍스트의 줄이 있으면 재스캔일
+    // 뿐 진짜 새 행이 아니므로 걸러낸다.
+    extraLines = extraLines.filter(function (line) {
+      return priceText.indexOf(line.trim()) === -1;
+    });
     if (!extraLines.length) return null;
 
     var merged = (priceText + '\n' + extraLines.join('\n')).trim();
