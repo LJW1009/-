@@ -1015,8 +1015,10 @@ function parseNaverListings(text){
       return;
     }
     // "오피스텔분양권180OB/84m²"처럼 오피스텔/아파트와 타입코드 사이에 "분양권" 같은 설명
-    // 단어가 끼어 있어도, 타입코드 자체(숫자+영문, 예: 180OB)만 정확히 뽑아낸다.
-    const tm=line.match(/^(오피스텔|아파트)[^\d\/]*([0-9]+[A-Za-z]*)\s*\/\s*([\d.]+)\s*m/);
+    // 단어가 끼어 있어도, 타입코드 자체(숫자+영문 조합, 예: 180OB, 245C2)만 정확히 뽑아낸다.
+    // 타입코드는 항상 숫자로 시작하므로, 그 앞의 설명 문구(숫자·슬래시 없는 텍스트)를 건너뛴 뒤
+    // 숫자·영문이 섞인 덩어리 전체(245C2처럼 문자 뒤에 다시 숫자가 오는 경우 포함)를 캡처한다.
+    const tm=line.match(/^(오피스텔|아파트)[^\d\/]*([0-9A-Za-z]+)\s*\/\s*([\d.]+)\s*m/);
     if(tm&&pending){
       listings.push({typeCode:tm[2].trim(),area:parseFloat(tm[3]),lo:pending.lo,hi:pending.hi});
       pending=null;
