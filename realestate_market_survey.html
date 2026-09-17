@@ -1014,13 +1014,16 @@ function parseNaverListings(text){
       if(lo!=null)pending={lo,hi:(hi!=null?hi:lo)};
       return;
     }
-    // "오피스텔분양권180OB/84m²"처럼 오피스텔/아파트와 타입코드 사이에 "분양권" 같은 설명
-    // 단어가 끼어 있어도, 타입코드 자체(숫자+영문 조합, 예: 180OB, 245C2)만 정확히 뽑아낸다.
-    // 타입코드는 항상 숫자로 시작하므로, 그 앞의 설명 문구(숫자·슬래시 없는 텍스트)를 건너뛴 뒤
-    // 숫자·영문이 섞인 덩어리 전체(245C2처럼 문자 뒤에 다시 숫자가 오는 경우 포함)를 캡처한다.
-    const tm=line.match(/^(오피스텔|아파트)[^\d\/]*([0-9A-Za-z]+)\s*\/\s*([\d.]+)\s*m/);
+    // 타입/면적 줄만 대상으로 한다("오피스텔"/"아파트"로 시작).
+    if(!/^(오피스텔|아파트)/.test(line))return;
+    // "오피스텔분양권180OB/84m²", "오피스텔245C2/114m²"처럼 오피스텔/아파트와 타입코드
+    // 사이에 "분양권" 같은 설명 문구가 몇 글자가 끼든, 타입코드 표기가 숫자+영문 어떤
+    // 조합(180OB, 245C2, 84A 등)이든 상관없이 항상 "타입코드/면적m²" 형태로 붙어 있다는
+    // 것만 가정한다 — "/숫자m" 바로 앞에 붙은 영문·숫자 덩어리를 타입코드로 뽑아내므로,
+    // 새로운 표기 변형이 나올 때마다 정규식을 또 고칠 필요가 없다.
+    const tm=line.match(/([0-9A-Za-z]+)\s*\/\s*([\d.]+)\s*m/);
     if(tm&&pending){
-      listings.push({typeCode:tm[2].trim(),area:parseFloat(tm[3]),lo:pending.lo,hi:pending.hi});
+      listings.push({typeCode:tm[1].trim(),area:parseFloat(tm[2]),lo:pending.lo,hi:pending.hi});
       pending=null;
     }
   });
