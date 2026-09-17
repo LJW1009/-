@@ -1096,6 +1096,11 @@ function doParse() {
     return acc;
   }, []);
   reconcileFamilyAreaUnits(areaTypes, flatPriceRows);
+  // 세대수 컬럼이 아예 없어 모든 행이 fallback(1)인 타입은, 공급대상표의 표기 세대수를
+  // 가격 구간 행 개수만큼 균등 배분한다(원문에 층구간별 실제 배분이 없어 더 정확히 알
+  // 방법이 없음 - parser.js 주석 참고). reconcileFamilyAreaUnits보다 뒤에 호출해 통합청약
+  // 패밀리 보정이 끝난 최신 supply_units를 기준으로 배분한다.
+  redistributeFallbackUnitsWithArea(areaTypes, priceRows);
   const balcony = parseBalconySection(f.taBalc, codes);
   const options = parseOptionSection(f.taOpt, codes);
   const meta = extractMeta((lastPdfFullText ? lastPdfFullText + '\n' : '') + f.taPrice + '\n' + f.taArea);

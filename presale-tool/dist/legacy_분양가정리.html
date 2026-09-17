@@ -1163,14 +1163,26 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     var i = dataStart;
     var n = tokens.length;
 
+    // "2~17층 최고 ... / 최저 ..."처럼 이미 층 범위가 있는 행에 "최고"/"최저"
+    // (뒤에 "가"가 안 붙는 순한글 라벨이라 서브옵션 라벨과 똑같은 모양)가 이어지는
+    // 표가 있다(실사례: 청라 피크원 푸르지오 오피스텔). 이 라벨은 "기본형"/
+    // "마이너스옵션"과 달리 동/호(위치)가 아니라 그 층 구간 "안"에서의 가격
+    // 구간(최고가/최저가)을 가리키므로, 동/라인 칸이 아니라 층 범위 뒤에 붙여야
+    // "1호, 2호 최고"(동/호+가격구간이 뒤섞임)처럼 보이지 않는다. 층 범위 없이
+    // 코드 뒤에 "최저가"/"최고가"(가 붙음) 두 행만 있는 기존 케이스(1090번째 줄
+    // 부근)는 이 함수를 안 거치므로 영향받지 않는다.
+    var TIER_LABEL_RE = /^(최고|최저)$/;
     function pushRow(floorRaw, r) {
+      var isTierLabel = r.label && TIER_LABEL_RE.test(r.label);
+      var floorText = isTierLabel ? (floorRaw + ' ' + r.label) : floorRaw;
+      var labelForDong = isTierLabel ? null : r.label;
       currentCodes.forEach(function (code) {
         rows.push({
           code: code,
-          floor: parseFloorDesc(floorRaw),
+          floor: parseFloorDesc(floorText),
           // 세대수 컬럼이 없는 표에서는 서브옵션 라벨(기본형/마이너스옵션 등)을
           // 동/라인 칸에 대신 표시해 두 행을 구분할 수 있게 한다.
-          dong: r.label ? (currentDong ? currentDong + ' ' + r.label : r.label) : currentDong,
+          dong: labelForDong ? (currentDong ? currentDong + ' ' + labelForDong : labelForDong) : currentDong,
           units: r.units != null ? r.units : 1,
           price: r.values.total,
           down_payment: r.values.down != null ? r.values.down : null,
@@ -1376,6 +1388,34 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       members.forEach(function (c) { if (byCode[c]) byCode[c].supply_units = unitsByCode[c]; });
     });
     return areaTypes;
+  }
+
+  // 세대수 컬럼이 아예 없는 가격표(예: "최고/최저 x 3개 층구간"처럼 층구간별 실제 세대수
+  // 배분이 원문 어디에도 없는 구조 - 실사례: 청라 피크원 푸르지오 오피스텔)는
+  // readMoneyRun의 fallback으로 모든 행이 units=1이 된다. 이 상태를 그대로 두면 "소계"/
+  // "합계" 행의 세대수 합계가 공급대상표의 실제 표기 세대수(예: 176세대)와 크게 어긋나
+  // 보인다(예: 합계가 6으로 나옴 - 세대수가 아니라 가격 구간 개수이기 때문). 층구간별
+  // 실제 배분은 원문에 전혀 없어 지어낼 수 없으므로, "몇 개의 가격 구간이든 같은 비중으로
+  // 본다"는 가장 단순하고 검증 가능한 가정으로 표기 세대수를 균등 배분한다(나머지는 앞쪽
+  // 행부터 1씩 더해 합이 정확히 표기 세대수가 되게 함) - 26차에서 사용자가 이미 확인한
+  // "최저가/최고가 두 행을 절반씩 나누는" 규칙을 N행으로 일반화한 것이다.
+  // 그 코드의 "모든" 행이 fallback 기본값(1)일 때만 적용한다 - 하나라도 원문에서 실제
+  // 세대수가 파싱된 행이 섞여 있으면(=이미 진짜 정보가 있다는 뜻) 건드리지 않는다. 이미
+  // 행 개수와 표기 세대수가 정확히 같으면(예: 최저가/최고가 두 행에 총 2세대) 재배분할
+  // 필요 자체가 없으므로 그대로 둔다.
+  function redistributeFallbackUnitsWithArea(areaTypes, priceRowsByCode) {
+    if (!areaTypes || !priceRowsByCode) return priceRowsByCode;
+    areaTypes.forEach(function (t) {
+      var rows = priceRowsByCode[t.code];
+      if (!rows || !rows.length || !isFinite(t.supply_units) || t.supply_units <= 0) return;
+      if (rows.length === t.supply_units) return;
+      var allFallback = rows.every(function (r) { return r.units === 1; });
+      if (!allFallback) return;
+      var base = Math.floor(t.supply_units / rows.length);
+      var remainder = t.supply_units - base * rows.length;
+      rows.forEach(function (r, idx) { r.units = base + (idx < remainder ? 1 : 0); });
+    });
+    return priceRowsByCode;
   }
 
   // 긴 소수형 관리코드가 줄바꿈 지점에서 마지막 숫자 한 자리(+문자 접미사)만 다음 줄로
@@ -1835,6 +1875,14 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       var openM2 = text.match(/(\d{4}[.\-/]\s*\d{1,2}[.\-/]\s*\d{1,2})\s*\.?\s*[).）][^\n]{0,40}(?:입주자\s*모집\s*공고\s*승인|분양\s*신고\s*처리|분양\s*신고|승인|신고)/);
       if (openM2) open_date = parseFlexDate(openM2[1]);
     }
+    if (!open_date) {
+      // "최초 분양광고일(2025.07.17.)"처럼 날짜가 키워드 "뒤"(괄호 안)에 오는, openM2와
+      // 반대 순서의 표기도 있다(실사례: 청라 피크원 푸르지오 오피스텔 - 정정공고문이라
+      // "공고일:" 라벨도, "날짜)...승인" 순서도 전혀 없고 "최초 분양광고일(날짜)"만
+      // 문서 곳곳에 반복된다).
+      var openM3 = text.match(/(?:최초\s*)?분양\s*광고\s*일\s*[(（]\s*(\d{4}[.\-/]\s*\d{1,2}[.\-/]\s*\d{1,2})/);
+      if (openM3) open_date = parseFlexDate(openM3[1]);
+    }
 
     // "입주예정월", "입주예정일", "입주시기"(예정 없이) 등 표기 변형 모두 지원
     var moveM = text.match(/입주\s*(?:예정\s*)?(?:월|일|시기)?\s*[:：]?\s*(\d{4})\s*[년.\-]\s*(\d{1,2})\s*월?/);
@@ -1919,13 +1967,21 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     // "■ 공급면적 및 공급규모", "▣ 공급면적"). 표 안 열 이름·본문 산문에도 "공급면적"이
     // 그냥 단어로 등장하지만(예: "전용면적, 공급면적 및 계약면적의...") ■/▣ 기호가 바로
     // 앞에 붙는 진짜 제목줄만 앵커로 삼으므로 잘못 걸리지 않는다.
-    area: [/[■▣]\s*공급대상\s*(?:및\s*공급규모)?(?!물)/, /^\s*공급대상\s*및\s*면적/m, /[■▣]\s*공급면적\s*(?:및\s*공급규모)?/],
+    // 대분류 제목("Ⅰ 공급내역 및 공급금액")과 표 제목이 분리된 문서는 표 제목 자체가
+    // 불릿도 "및 면적"도 없이 그냥 "공급대상 (단위: ㎡, 호실)"처럼 단위표기 괄호가 바로
+    // 뒤에 붙는 경우가 있다(실사례: 청라 피크원 푸르지오 오피스텔). "공급대상물"(전혀
+    // 다른 절 - 대지면적/연면적 등 사업개요)과 헷갈리지 않도록 "물"이 바로 뒤에 오면
+    // 제외한다.
+    area: [/[■▣]\s*공급대상\s*(?:및\s*공급규모)?(?!물)/, /^\s*공급대상\s*및\s*면적/m, /^\s*공급대상(?!물)\s*[(（]/m, /[■▣]\s*공급면적\s*(?:및\s*공급규모)?/],
     // "■ 공급금액 표"처럼 짧게 줄여 쓰는 문서도 있다(실사례: 북수원이목지구 대방 디에트르
     // 더 리체Ⅰ(A4BL) - 다른 문서들의 "및 납부일정"/"납부조건 등 안내" 대신 그냥 "표"만 붙음).
     // "납부일정"의 두 글자 사이에 공백이 낀 "납부 일정"도 있다(실사례: 목동윤슬자이
     // 오피스텔 - "■ 공급금액 및 납부 일정" - PDF 추출 시 한글 단어 중간에 공백이 끼는,
     // 이미 여러 차례 확인된 문제와 같은 종류).
-    price: [/[■▣]\s*공급금액\s*및\s*납부\s*일정/, /[■▣]\s*분양가격\s*납부조건\s*등?\s*안내/, /[■▣]\s*공급금액\s*납부조건\s*등?\s*안내/, /[■▣]\s*공급금액\s*표(?![가-힣])/, /^\s*공급대금\s*및\s*납부일정/m],
+    // area와 마찬가지로 "공급금액 및 납부일정 (단위: 원, VAT포함)"처럼 불릿 없이 표
+    // 제목만 줄 시작에 오는 문서가 있다(실사례: 청라 피크원 푸르지오 오피스텔 - 기존
+    // 불릿 없는 폴백은 "공급대금"이라 다른 단어라 못 걸렸다).
+    price: [/[■▣]\s*공급금액\s*및\s*납부\s*일정/, /[■▣]\s*분양가격\s*납부조건\s*등?\s*안내/, /[■▣]\s*공급금액\s*납부조건\s*등?\s*안내/, /[■▣]\s*공급금액\s*표(?![가-힣])/, /^\s*공급대금\s*및\s*납부일정/m, /^\s*공급금액\s*및\s*납부\s*일정/m],
     balcony: [/[■▣]\s*발코니\s*확장/],
     // "추가"로 시작해 "옵션품목"으로 끝나는 헤딩은 문서마다 그 사이에 들어가는 말이
     // 제각각이다(추가 선택 옵션품목/추가선택 옵션품목/추가선택사항 옵션품목 등 - 실사례:
@@ -1935,7 +1991,9 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     // 삼아 일반화한다 - 사이 구간을 순수 한글/공백 6자 이내로 제한해 본문 산문 속
     // 우연한 재언급(예: "▣ 시스템 에어컨 및 추가선택사항 옵션품목"은 ■/▣ 바로 뒤가
     // "추가"가 아니라 "시스템"이라 애초에 매칭되지 않는다)까지 잘못 앵커로 삼는 일은 없다.
-    option: [/[■▣]\s*추가[\s가-힣]{0,6}옵션품목/, /[■▣]\s*옵션품목/, /[■▣]\s*별도계약\s*[-–]\s*추가\s*선택품목/, /[■▣]\s*추가\s*선택품목/]
+    // "■ 선택품목(유상옵션) 공급금액 및 납부일정"처럼 "추가"로 시작하지 않고 "선택품목
+    // (유상옵션)"으로 시작하는 헤딩도 있다(실사례: 청라 피크원 푸르지오 오피스텔).
+    option: [/[■▣]\s*추가[\s가-힣]{0,6}옵션품목/, /[■▣]\s*옵션품목/, /[■▣]\s*별도계약\s*[-–]\s*추가\s*선택품목/, /[■▣]\s*추가\s*선택품목/, /[■▣]\s*선택품목\s*[(（]\s*유상\s*옵션\s*[)）]/]
   };
   var NEXT_MAJOR_SECTION_RE = /청약신청\s*자격\s*및\s*공급일정/;
 
@@ -2466,6 +2524,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     parseAreaSection: parseAreaSection,
     parsePriceSection: parsePriceSection,
     reconcileFamilyAreaUnits: reconcileFamilyAreaUnits,
+    redistributeFallbackUnitsWithArea: redistributeFallbackUnitsWithArea,
     parseBalconySection: parseBalconySection,
     parseOptionSection: parseOptionSection,
     extractMeta: extractMeta,

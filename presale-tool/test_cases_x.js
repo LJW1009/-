@@ -94,7 +94,7 @@ module.exports = [
   },
   {
     id: 'X02',
-    desc: '불릿 없이 "공급금액 및 납부일정 (단위: 원, VAT포함)"만 있는 표 제목도 price 앵커로 인식하고, "최고/최저 x 3개 층구간" 6행 구조에서 실제 금액을 정확히 읽음(대지비+건축비+부가세=공급금액 산술 검증 통과)',
+    desc: '불릿 없이 "공급금액 및 납부일정 (단위: 원, VAT포함)"만 있는 표 제목도 price 앵커로 인식하고, "최고/최저 x 3개 층구간" 6행 구조에서 실제 금액을 정확히 읽음(대지비+건축비+부가세=공급금액 산술 검증 통과). "최고"/"최저"는 동/호(F열)가 아니라 층별(G열) 쪽에 붙어야 한다("1호, 2호 최고"처럼 동호수와 뒤섞이면 안 됨).',
     run: function (p) {
       var sections = p.splitDocumentSections(AREA_PRICE_EXCERPT);
       if (!sections.found.price) return false;
@@ -102,10 +102,26 @@ module.exports = [
       var codes = area.map(function (x) { return x.code; });
       var price = p.parsePriceSection(sections.price, codes);
       var r = price.priceRows.find(function (x) {
-        return x.code === '84OA' && x.floor.raw === '2~17층' && x.dong.indexOf('최고') !== -1;
+        return x.code === '84OA' && x.floor.raw === '2~17층 최고';
       });
       return !!r && r.price === 752500000 && r.land + r.build + r.vat === r.price
+        && r.dong.indexOf('최고') === -1 && r.dong.indexOf('1호') !== -1
         && price.priceRows.filter(function (x) { return x.code === '84OA'; }).length === 6;
+    }
+  },
+  {
+    id: 'X06',
+    desc: '세대수 컬럼이 아예 없어 모든 행이 fallback(1)인 타입은, 공급대상표의 표기 세대수(176)를 가격 행 개수(6)만큼 균등 배분해 합계가 정확히 176이 되어야 한다(6으로 잘못 나오면 안 됨)',
+    run: function (p) {
+      var sections = p.splitDocumentSections(AREA_PRICE_EXCERPT);
+      var area = p.parseAreaSection(sections.area, true);
+      var codes = area.map(function (x) { return x.code; });
+      var price = p.parsePriceSection(sections.price, codes);
+      var byCode = {};
+      price.priceRows.forEach(function (r) { (byCode[r.code] = byCode[r.code] || []).push(r); });
+      p.redistributeFallbackUnitsWithArea(area, byCode);
+      var sum84OA = byCode['84OA'].reduce(function (s, r) { return s + r.units; }, 0);
+      return sum84OA === 176 && byCode['84OA'].length === 6;
     }
   },
   {

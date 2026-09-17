@@ -1424,14 +1424,26 @@ function dateSerial(dt) {
     var i = dataStart;
     var n = tokens.length;
 
+    // "2~17층 최고 ... / 최저 ..."처럼 이미 층 범위가 있는 행에 "최고"/"최저"
+    // (뒤에 "가"가 안 붙는 순한글 라벨이라 서브옵션 라벨과 똑같은 모양)가 이어지는
+    // 표가 있다(실사례: 청라 피크원 푸르지오 오피스텔). 이 라벨은 "기본형"/
+    // "마이너스옵션"과 달리 동/호(위치)가 아니라 그 층 구간 "안"에서의 가격
+    // 구간(최고가/최저가)을 가리키므로, 동/라인 칸이 아니라 층 범위 뒤에 붙여야
+    // "1호, 2호 최고"(동/호+가격구간이 뒤섞임)처럼 보이지 않는다. 층 범위 없이
+    // 코드 뒤에 "최저가"/"최고가"(가 붙음) 두 행만 있는 기존 케이스(1090번째 줄
+    // 부근)는 이 함수를 안 거치므로 영향받지 않는다.
+    var TIER_LABEL_RE = /^(최고|최저)$/;
     function pushRow(floorRaw, r) {
+      var isTierLabel = r.label && TIER_LABEL_RE.test(r.label);
+      var floorText = isTierLabel ? (floorRaw + ' ' + r.label) : floorRaw;
+      var labelForDong = isTierLabel ? null : r.label;
       currentCodes.forEach(function (code) {
         rows.push({
           code: code,
-          floor: parseFloorDesc(floorRaw),
+          floor: parseFloorDesc(floorText),
           // 세대수 컬럼이 없는 표에서는 서브옵션 라벨(기본형/마이너스옵션 등)을
           // 동/라인 칸에 대신 표시해 두 행을 구분할 수 있게 한다.
-          dong: r.label ? (currentDong ? currentDong + ' ' + r.label : r.label) : currentDong,
+          dong: labelForDong ? (currentDong ? currentDong + ' ' + labelForDong : labelForDong) : currentDong,
           units: r.units != null ? r.units : 1,
           price: r.values.total,
           down_payment: r.values.down != null ? r.values.down : null,
@@ -1637,6 +1649,34 @@ function dateSerial(dt) {
       members.forEach(function (c) { if (byCode[c]) byCode[c].supply_units = unitsByCode[c]; });
     });
     return areaTypes;
+  }
+
+  // 세대수 컬럼이 아예 없는 가격표(예: "최고/최저 x 3개 층구간"처럼 층구간별 실제 세대수
+  // 배분이 원문 어디에도 없는 구조 - 실사례: 청라 피크원 푸르지오 오피스텔)는
+  // readMoneyRun의 fallback으로 모든 행이 units=1이 된다. 이 상태를 그대로 두면 "소계"/
+  // "합계" 행의 세대수 합계가 공급대상표의 실제 표기 세대수(예: 176세대)와 크게 어긋나
+  // 보인다(예: 합계가 6으로 나옴 - 세대수가 아니라 가격 구간 개수이기 때문). 층구간별
+  // 실제 배분은 원문에 전혀 없어 지어낼 수 없으므로, "몇 개의 가격 구간이든 같은 비중으로
+  // 본다"는 가장 단순하고 검증 가능한 가정으로 표기 세대수를 균등 배분한다(나머지는 앞쪽
+  // 행부터 1씩 더해 합이 정확히 표기 세대수가 되게 함) - 26차에서 사용자가 이미 확인한
+  // "최저가/최고가 두 행을 절반씩 나누는" 규칙을 N행으로 일반화한 것이다.
+  // 그 코드의 "모든" 행이 fallback 기본값(1)일 때만 적용한다 - 하나라도 원문에서 실제
+  // 세대수가 파싱된 행이 섞여 있으면(=이미 진짜 정보가 있다는 뜻) 건드리지 않는다. 이미
+  // 행 개수와 표기 세대수가 정확히 같으면(예: 최저가/최고가 두 행에 총 2세대) 재배분할
+  // 필요 자체가 없으므로 그대로 둔다.
+  function redistributeFallbackUnitsWithArea(areaTypes, priceRowsByCode) {
+    if (!areaTypes || !priceRowsByCode) return priceRowsByCode;
+    areaTypes.forEach(function (t) {
+      var rows = priceRowsByCode[t.code];
+      if (!rows || !rows.length || !isFinite(t.supply_units) || t.supply_units <= 0) return;
+      if (rows.length === t.supply_units) return;
+      var allFallback = rows.every(function (r) { return r.units === 1; });
+      if (!allFallback) return;
+      var base = Math.floor(t.supply_units / rows.length);
+      var remainder = t.supply_units - base * rows.length;
+      rows.forEach(function (r, idx) { r.units = base + (idx < remainder ? 1 : 0); });
+    });
+    return priceRowsByCode;
   }
 
   // 긴 소수형 관리코드가 줄바꿈 지점에서 마지막 숫자 한 자리(+문자 접미사)만 다음 줄로
@@ -2745,6 +2785,7 @@ function dateSerial(dt) {
     parseAreaSection: parseAreaSection,
     parsePriceSection: parsePriceSection,
     reconcileFamilyAreaUnits: reconcileFamilyAreaUnits,
+    redistributeFallbackUnitsWithArea: redistributeFallbackUnitsWithArea,
     parseBalconySection: parseBalconySection,
     parseOptionSection: parseOptionSection,
     extractMeta: extractMeta,
@@ -3032,6 +3073,11 @@ function doParse() {
     return acc;
   }, []);
   reconcileFamilyAreaUnits(areaTypes, flatPriceRows);
+  // 세대수 컬럼이 아예 없어 모든 행이 fallback(1)인 타입은, 공급대상표의 표기 세대수를
+  // 가격 구간 행 개수만큼 균등 배분한다(원문에 층구간별 실제 배분이 없어 더 정확히 알
+  // 방법이 없음 - parser.js 주석 참고). reconcileFamilyAreaUnits보다 뒤에 호출해 통합청약
+  // 패밀리 보정이 끝난 최신 supply_units를 기준으로 배분한다.
+  redistributeFallbackUnitsWithArea(areaTypes, priceRows);
   const balcony = parseBalconySection(f.taBalc, codes);
   const options = parseOptionSection(f.taOpt, codes);
   const meta = extractMeta((lastPdfFullText ? lastPdfFullText + '\n' : '') + f.taPrice + '\n' + f.taArea);
