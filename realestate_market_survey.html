@@ -67,6 +67,8 @@ tbody tr:hover td{background:#f5f5f3}
 .chk-item{display:inline-flex;align-items:center;gap:4px;cursor:pointer;font-size:12px;white-space:nowrap;padding:4px 8px;border:1px solid var(--bdr);border-radius:var(--r);background:var(--bg)}
 .chk-item input{width:13px;height:13px;accent-color:var(--bl);flex-shrink:0}
 .chk-div{width:1px;align-self:stretch;background:var(--bdr);margin:0 2px}
+.exp-caret{cursor:pointer;color:var(--t2);width:14px;text-align:center;font-size:10px;user-select:none;flex-shrink:0}
+.exp-caret:hover{color:var(--t1)}
 .hl td{background:#FFF3E0!important;font-weight:700}
 .tr-group-avg td{background:#E2EFDA;color:#000000;font-weight:700}
 .nc{color:var(--t3);font-style:italic}
@@ -296,17 +298,10 @@ tbody tr:hover td{background:#f5f5f3}
     </details>
     <div class="div"></div>
     <div class="sec">내보낼 단지 선택</div>
-    <div class="row" style="align-items:flex-end">
-      <div class="f"><label>대분류</label><select id="exp-region" onchange="updSelMinor('exp-minor','exp-region');renderExpList()"><option value="">전체</option></select></div>
-      <div class="f"><label>소분류</label><select id="exp-minor" onchange="renderExpList()"><option value="">전체</option></select></div>
-      <div class="f" style="max-width:100px"><label>유형</label>
-        <select id="exp-type" onchange="renderExpList()"><option value="">전체</option><option>아파트</option><option>오피스텔</option></select>
-      </div>
-    </div>
+    <p class="hint" style="margin-bottom:8px">· ▶ 를 눌러 지역을 펼치면 그 안의 단지를 체크할 수 있습니다.</p>
     <div style="display:flex;gap:8px;margin-bottom:8px">
-      <button class="btn btn-sm" onclick="selAllExp(true)">화면에 보이는 단지 전체 선택</button>
-      <button class="btn btn-sm" onclick="selAllExp(false)">화면에 보이는 단지 전체 해제</button>
-      <button class="btn btn-sm" onclick="resetExpFilter()">필터 초기화 (전체 보기)</button>
+      <button class="btn btn-sm" onclick="selAllExp(true)">전체 선택</button>
+      <button class="btn btn-sm" onclick="selAllExp(false)">전체 해제</button>
     </div>
     <div id="exp-list" style="max-height:320px;overflow-y:auto"></div>
     <div id="msg-exp" style="margin-top:8px"></div>
@@ -628,10 +623,10 @@ function initSels(){
   // 대분류: 등록된 region에서 첫 단어 추출
   const allRegions=[...new Set(DB.complexes.map(c=>c.region))].sort();
   const majorSet=[...new Set(allRegions.map(r=>r.split(' ')[0]))].sort();
-  ['sel-region','inp-region','res-region','exp-region'].forEach(id=>{
+  ['sel-region','inp-region','res-region'].forEach(id=>{
     const el=document.getElementById(id);if(!el)return;
     const cur=el.value;
-    el.innerHTML=(id==='sel-region'||id==='exp-region')?'<option value="">전체</option>':'<option value="">선택</option>';
+    el.innerHTML=id==='sel-region'?'<option value="">전체</option>':'<option value="">선택</option>';
     majorSet.forEach(r=>{const o=document.createElement('option');o.value=r;o.text=r;el.appendChild(o);});
     if(cur&&majorSet.includes(cur))el.value=cur;
   });
@@ -642,7 +637,7 @@ function initSels(){
   const majorEl=document.getElementById('c-region-major');
   if(majorEl&&editCxId){const cx=DB.complexes.find(x=>x.id===editCxId);if(cx){const maj=cx.region.split(' ')[0];if(majorEl.querySelector('option[value="'+maj+'"]'))majorEl.value=maj;}}
   // 필터용 소분류 selects 초기화 (대분류 값 기준)
-  ['sel','inp','res','exp'].forEach(function(pfx){updSelMinor(pfx+'-minor',pfx+'-region');});
+  ['sel','inp','res'].forEach(function(pfx){updSelMinor(pfx+'-minor',pfx+'-region');});
   updInpCx();updResCx();
 }
 function filteredCx(rId,tId,minorId){
@@ -2644,23 +2639,25 @@ function renderResult(){
 // 단지관리(sel-region/sel-minor/sel-type)와 동일한 방식으로 지역·유형 필터를 적용해, 대상이
 // 많을 때 스크롤 없이 원하는 단지만 좁혀볼 수 있게 한다. 체크 여부는 필터로 화면에서 안 보이게
 // 되어도 사라지지 않도록 expUnchecked(선택 해제된 단지 id 집합)에 별도로 저장해 둔다.
+// 대분류·소분류를 접어둔 채로 보여주고, 클릭하면 펼쳐서 그 안의 단지를 체크하는 방식.
+// 필터 드롭다운 대신 접기/펼치기라, 목록이 길어도 처음엔 지역명만 쭉 보이고 필요한 지역만
+// 펼치면 되므로 스크롤을 줄일 수 있다. 체크박스와 접기/펼치기 토글은 서로 별개 동작이다.
 function renderExpList(){
   const el=document.getElementById('exp-list');if(!el)return;
   if(!DB.complexes.length){el.innerHTML='<div class="empty">등록된 단지 없음</div>';return;}
-  const list=filteredCx('exp-region','exp-type','exp-minor');
-  if(!list.length){el.innerHTML='<div class="empty">필터 조건에 맞는 단지가 없습니다.</div>';return;}
   // 대분류별 → 소분류별 → 단지 3단계
-  const majors=[...new Set(list.map(c=>c.region.split(' ')[0]))].sort();
+  const majors=[...new Set(DB.complexes.map(c=>c.region.split(' ')[0]))].sort();
   el.innerHTML=majors.map(function(maj){
     const majId='rgn-'+encodeURIComponent(maj);
-    // 이 대분류에 속한, 필터를 통과한 단지
-    const allCxInMaj=list.filter(function(c){return c.region.startsWith(maj+' ')||c.region===maj;});
+    const majBodyId='body-'+majId;
+    const allCxInMaj=DB.complexes.filter(function(c){return c.region.startsWith(maj+' ')||c.region===maj;});
     // 소분류 그룹핑
     const minors=[...new Set(allCxInMaj.map(function(c){return c.region.split(' ').slice(1).join(' ');}))].sort();
     const minorHtml=minors.map(function(min){
       const fullReg=maj+(min?' '+min:'');
       const cxInMin=allCxInMaj.filter(function(c){return c.region===fullReg||c.region.startsWith(fullReg+' ');});
       const minId='rgn-'+encodeURIComponent(fullReg);
+      const minBodyId='body-'+minId;
       const cxRows=cxInMin.map(function(c){
         const checked=!expUnchecked.has(c.id);
         return '<label class="chk" style="padding-left:44px">'+
@@ -2671,31 +2668,40 @@ function renderExpList(){
           '<span style="font-size:11px;color:var(--t3);margin-left:4px">'+c.totalUnits+'세대</span></label>';
       }).join('');
       const minAllChecked=cxInMin.every(function(c){return !expUnchecked.has(c.id);});
-      const minSomeChecked=cxInMin.some(function(c){return !expUnchecked.has(c.id);});
-      return '<div>'+
-        '<label class="chk" style="padding-left:16px;background:var(--bg3);border-radius:var(--r);margin-bottom:2px">'+
-          '<input type="checkbox" id="'+minId+'" '+(minAllChecked?'checked':'')+' '+
-          'data-region="'+fullReg+'" data-maj="'+majId+'" onchange="toggleRegionChk(this)">'+
-          '<span style="font-size:11px;font-weight:600;color:var(--t1)">'+fullReg+'</span>'+
-          '<span style="font-size:11px;color:var(--t3);margin-left:4px">'+cxInMin.length+'개</span>'+
-        '</label>'+cxRows+'</div>';
+      return '<div class="exp-min-group">'+
+        '<div class="chk" style="padding-left:16px;background:var(--bg3);border-radius:var(--r);margin-bottom:2px;display:flex;align-items:center;gap:6px">'+
+          '<span class="exp-caret" onclick="toggleExpCollapse(\''+minBodyId+'\',this)">▶</span>'+
+          '<label style="display:flex;align-items:center;gap:8px;flex:1;cursor:pointer;margin:0">'+
+            '<input type="checkbox" id="'+minId+'" '+(minAllChecked?'checked':'')+' '+
+            'data-region="'+fullReg+'" data-maj="'+majId+'" onchange="toggleRegionChk(this)">'+
+            '<span style="font-size:11px;font-weight:600;color:var(--t1)">'+fullReg+'</span>'+
+            '<span style="font-size:11px;color:var(--t3)">'+cxInMin.length+'개</span>'+
+          '</label>'+
+        '</div>'+
+        '<div id="'+minBodyId+'" style="display:none">'+cxRows+'</div>'+
+      '</div>';
     }).join('');
     const majAllChecked=allCxInMaj.every(function(c){return !expUnchecked.has(c.id);});
-    return '<div style="margin-bottom:12px">'+
-      '<label class="chk" style="background:var(--bg2);border-radius:var(--r);margin-bottom:4px">'+
-        '<input type="checkbox" id="'+majId+'" '+(majAllChecked?'checked':'')+' '+
-        'data-region="'+maj+'" onchange="toggleRegionChkAll(this)">'+
-        '<span style="font-size:12px;font-weight:700;color:var(--t1)">'+maj+'</span>'+
-        '<span style="font-size:11px;color:var(--t3);margin-left:6px">'+allCxInMaj.length+'개 단지</span>'+
-      '</label>'+
-      minorHtml+
+    return '<div class="exp-maj-group" style="margin-bottom:8px">'+
+      '<div class="chk" style="background:var(--bg2);border-radius:var(--r);margin-bottom:4px;display:flex;align-items:center;gap:6px">'+
+        '<span class="exp-caret" onclick="toggleExpCollapse(\''+majBodyId+'\',this)">▶</span>'+
+        '<label style="display:flex;align-items:center;gap:8px;flex:1;cursor:pointer;margin:0">'+
+          '<input type="checkbox" id="'+majId+'" '+(majAllChecked?'checked':'')+' '+
+          'data-region="'+maj+'" onchange="toggleRegionChkAll(this)">'+
+          '<span style="font-size:12px;font-weight:700;color:var(--t1)">'+maj+'</span>'+
+          '<span style="font-size:11px;color:var(--t3)">'+allCxInMaj.length+'개 단지</span>'+
+        '</label>'+
+      '</div>'+
+      '<div id="'+majBodyId+'" style="display:none">'+minorHtml+'</div>'+
     '</div>';
   }).join('');
 }
-function resetExpFilter(){
-  ['exp-region','exp-minor','exp-type'].forEach(function(id){var el=document.getElementById(id);if(el)el.value='';});
-  updSelMinor('exp-minor','exp-region');
-  renderExpList();
+// 대분류/소분류 헤더의 ▶ 를 눌러 하위 목록을 접었다 폈다 한다 (체크박스와는 무관한 동작).
+function toggleExpCollapse(bodyId,caret){
+  const body=document.getElementById(bodyId);if(!body)return;
+  const willOpen=body.style.display==='none';
+  body.style.display=willOpen?'block':'none';
+  caret.textContent=willOpen?'▼':'▶';
 }
 // 단지 체크박스 하나 토글 — expUnchecked에 반영 후 상위 소분류·대분류 체크 상태 재계산
 function toggleExpChk(cb){
@@ -2705,30 +2711,30 @@ function toggleExpChk(cb){
 // 대분류 체크 → 하위 모두 토글
 function toggleRegionChkAll(chk){
   const v=chk.checked;
-  const div=chk.closest('div[style*="margin-bottom"]');
-  if(!div)return;
-  div.querySelectorAll('.exp-chk').forEach(function(el){el.checked=v;if(v)expUnchecked.delete(el.value);else expUnchecked.add(el.value);});
-  div.querySelectorAll('input[id^="rgn-"]').forEach(function(el){if(el!==chk)el.checked=v;});
+  const grp=chk.closest('.exp-maj-group');
+  if(!grp)return;
+  grp.querySelectorAll('.exp-chk').forEach(function(el){el.checked=v;if(v)expUnchecked.delete(el.value);else expUnchecked.add(el.value);});
+  grp.querySelectorAll('input[id^="rgn-"]').forEach(function(el){if(el!==chk)el.checked=v;});
 }
 function toggleRegionChk(regionChk){
   const v=regionChk.checked;
-  const div=regionChk.closest('div');
-  if(!div)return;
-  div.querySelectorAll('.exp-chk').forEach(function(el){el.checked=v;if(v)expUnchecked.delete(el.value);else expUnchecked.add(el.value);});
+  const grp=regionChk.closest('.exp-min-group');
+  if(!grp)return;
+  grp.querySelectorAll('.exp-chk').forEach(function(el){el.checked=v;if(v)expUnchecked.delete(el.value);else expUnchecked.add(el.value);});
   syncRegionChk(regionChk.dataset.maj);
 }
 function syncRegionChk(regionId){
   const regionEl=document.getElementById(regionId);if(!regionEl)return;
-  // 이 ID를 가진 체크박스의 직계 부모 div 안의 .exp-chk 확인
-  const div=regionEl.closest('div');if(!div)return;
-  const cxChks=[...div.querySelectorAll('.exp-chk')];
+  // 이 id가 소분류든 대분류든, 가장 가까운 그룹(소분류 우선, 없으면 대분류) 안의 .exp-chk를 본다.
+  const grp=regionEl.closest('.exp-min-group, .exp-maj-group');if(!grp)return;
+  const cxChks=[...grp.querySelectorAll('.exp-chk')];
   if(!cxChks.length)return;
   const allChecked=cxChks.every(function(e){return e.checked;});
   const someChecked=cxChks.some(function(e){return e.checked;});
   regionEl.checked=allChecked;
   regionEl.indeterminate=!allChecked&&someChecked;
 }
-// 화면에 현재 보이는(필터를 통과한) 단지에 대해서만 전체 선택/해제한다.
+// 접혀 있어도 DOM에는 그대로 있으므로, 펼쳐보지 않은 지역까지 포함해 전체 선택/해제된다.
 function selAllExp(v){
   document.querySelectorAll('#exp-list input[type="checkbox"]').forEach(function(e){
     e.checked=v;e.indeterminate=false;
