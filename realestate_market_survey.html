@@ -296,11 +296,19 @@ tbody tr:hover td{background:#f5f5f3}
     </details>
     <div class="div"></div>
     <div class="sec">내보낼 단지 선택</div>
-    <div style="display:flex;gap:8px;margin-bottom:8px">
-      <button class="btn btn-sm" onclick="selAllExp(true)">전체 선택</button>
-      <button class="btn btn-sm" onclick="selAllExp(false)">전체 해제</button>
+    <div class="row" style="align-items:flex-end">
+      <div class="f"><label>대분류</label><select id="exp-region" onchange="updSelMinor('exp-minor','exp-region');renderExpList()"><option value="">전체</option></select></div>
+      <div class="f"><label>소분류</label><select id="exp-minor" onchange="renderExpList()"><option value="">전체</option></select></div>
+      <div class="f" style="max-width:100px"><label>유형</label>
+        <select id="exp-type" onchange="renderExpList()"><option value="">전체</option><option>아파트</option><option>오피스텔</option></select>
+      </div>
     </div>
-    <div id="exp-list" style="max-height:240px;overflow-y:auto"></div>
+    <div style="display:flex;gap:8px;margin-bottom:8px">
+      <button class="btn btn-sm" onclick="selAllExp(true)">화면에 보이는 단지 전체 선택</button>
+      <button class="btn btn-sm" onclick="selAllExp(false)">화면에 보이는 단지 전체 해제</button>
+      <button class="btn btn-sm" onclick="resetExpFilter()">필터 초기화 (전체 보기)</button>
+    </div>
+    <div id="exp-list" style="max-height:320px;overflow-y:auto"></div>
     <div id="msg-exp" style="margin-top:8px"></div>
   </div>
   <div class="card">
@@ -325,6 +333,9 @@ let typeRows=[];
 let dragSrcId=null; // 타입별 평형 정보 표의 드래그앤드롭 재정렬용
 let dragCxId=null; // 단지 목록의 드래그앤드롭 재정렬용
 let editCxId=null;
+// 내보내기 탭의 단지 체크 상태 — 지역/유형 필터로 목록을 좁혀도(다시 렌더링해도) 체크 여부가
+// 유지되도록 DOM이 아니라 여기(선택 해제된 단지 id 집합)에 별도로 기록한다. 기본값은 전체 체크.
+let expUnchecked=new Set();
 
 // 금액 단위를 만원→천원으로 전환하면서, 이미 저장된 기존 데이터(실거래가·호가·KB시세·전세·
 // 월세 보증금/월세)는 실제 금액이 그대로 유지되도록 전부 ×10 해서 한 번만 이관한다.
@@ -617,10 +628,10 @@ function initSels(){
   // 대분류: 등록된 region에서 첫 단어 추출
   const allRegions=[...new Set(DB.complexes.map(c=>c.region))].sort();
   const majorSet=[...new Set(allRegions.map(r=>r.split(' ')[0]))].sort();
-  ['sel-region','inp-region','res-region'].forEach(id=>{
+  ['sel-region','inp-region','res-region','exp-region'].forEach(id=>{
     const el=document.getElementById(id);if(!el)return;
     const cur=el.value;
-    el.innerHTML=id==='sel-region'?'<option value="">전체</option>':'<option value="">선택</option>';
+    el.innerHTML=(id==='sel-region'||id==='exp-region')?'<option value="">전체</option>':'<option value="">선택</option>';
     majorSet.forEach(r=>{const o=document.createElement('option');o.value=r;o.text=r;el.appendChild(o);});
     if(cur&&majorSet.includes(cur))el.value=cur;
   });
@@ -631,7 +642,7 @@ function initSels(){
   const majorEl=document.getElementById('c-region-major');
   if(majorEl&&editCxId){const cx=DB.complexes.find(x=>x.id===editCxId);if(cx){const maj=cx.region.split(' ')[0];if(majorEl.querySelector('option[value="'+maj+'"]'))majorEl.value=maj;}}
   // 필터용 소분류 selects 초기화 (대분류 값 기준)
-  ['sel','inp','res'].forEach(function(pfx){updSelMinor(pfx+'-minor',pfx+'-region');});
+  ['sel','inp','res','exp'].forEach(function(pfx){updSelMinor(pfx+'-minor',pfx+'-region');});
   updInpCx();updResCx();
 }
 function filteredCx(rId,tId,minorId){
@@ -2630,15 +2641,20 @@ function renderResult(){
 // ═══════════════════════════════════════════════════════════
 // 엑셀 내보내기
 // ═══════════════════════════════════════════════════════════
+// 단지관리(sel-region/sel-minor/sel-type)와 동일한 방식으로 지역·유형 필터를 적용해, 대상이
+// 많을 때 스크롤 없이 원하는 단지만 좁혀볼 수 있게 한다. 체크 여부는 필터로 화면에서 안 보이게
+// 되어도 사라지지 않도록 expUnchecked(선택 해제된 단지 id 집합)에 별도로 저장해 둔다.
 function renderExpList(){
   const el=document.getElementById('exp-list');if(!el)return;
   if(!DB.complexes.length){el.innerHTML='<div class="empty">등록된 단지 없음</div>';return;}
+  const list=filteredCx('exp-region','exp-type','exp-minor');
+  if(!list.length){el.innerHTML='<div class="empty">필터 조건에 맞는 단지가 없습니다.</div>';return;}
   // 대분류별 → 소분류별 → 단지 3단계
-  const majors=[...new Set(DB.complexes.map(c=>c.region.split(' ')[0]))].sort();
+  const majors=[...new Set(list.map(c=>c.region.split(' ')[0]))].sort();
   el.innerHTML=majors.map(function(maj){
     const majId='rgn-'+encodeURIComponent(maj);
-    // 이 대분류에 속한 전체 단지
-    const allCxInMaj=DB.complexes.filter(function(c){return c.region.startsWith(maj+' ')||c.region===maj;});
+    // 이 대분류에 속한, 필터를 통과한 단지
+    const allCxInMaj=list.filter(function(c){return c.region.startsWith(maj+' ')||c.region===maj;});
     // 소분류 그룹핑
     const minors=[...new Set(allCxInMaj.map(function(c){return c.region.split(' ').slice(1).join(' ');}))].sort();
     const minorHtml=minors.map(function(min){
@@ -2646,24 +2662,28 @@ function renderExpList(){
       const cxInMin=allCxInMaj.filter(function(c){return c.region===fullReg||c.region.startsWith(fullReg+' ');});
       const minId='rgn-'+encodeURIComponent(fullReg);
       const cxRows=cxInMin.map(function(c){
+        const checked=!expUnchecked.has(c.id);
         return '<label class="chk" style="padding-left:44px">'+
-          '<input type="checkbox" class="exp-chk" value="'+c.id+'" checked '+
-          'data-rgn="'+minId+'" data-maj="'+majId+'" onchange="syncRegionChk(this.dataset.rgn);syncRegionChk(this.dataset.maj)">'+
+          '<input type="checkbox" class="exp-chk" value="'+c.id+'" '+(checked?'checked':'')+' '+
+          'data-rgn="'+minId+'" data-maj="'+majId+'" onchange="toggleExpChk(this)">'+
           '<span style="font-size:13px;font-weight:600">'+c.name+'</span>'+
           '<span class="badge '+(c.type==='아파트'?'ba':'bo')+'" style="margin-left:4px">'+c.type+'</span>'+
           '<span style="font-size:11px;color:var(--t3);margin-left:4px">'+c.totalUnits+'세대</span></label>';
       }).join('');
+      const minAllChecked=cxInMin.every(function(c){return !expUnchecked.has(c.id);});
+      const minSomeChecked=cxInMin.some(function(c){return !expUnchecked.has(c.id);});
       return '<div>'+
         '<label class="chk" style="padding-left:16px;background:var(--bg3);border-radius:var(--r);margin-bottom:2px">'+
-          '<input type="checkbox" id="'+minId+'" checked '+
-          'data-region="'+fullReg+'" data-maj="'+majId+'" onchange="toggleRegionChk(this);syncRegionChk(this.dataset.maj)">'+
+          '<input type="checkbox" id="'+minId+'" '+(minAllChecked?'checked':'')+' '+
+          'data-region="'+fullReg+'" data-maj="'+majId+'" onchange="toggleRegionChk(this)">'+
           '<span style="font-size:11px;font-weight:600;color:var(--t1)">'+fullReg+'</span>'+
           '<span style="font-size:11px;color:var(--t3);margin-left:4px">'+cxInMin.length+'개</span>'+
         '</label>'+cxRows+'</div>';
     }).join('');
+    const majAllChecked=allCxInMaj.every(function(c){return !expUnchecked.has(c.id);});
     return '<div style="margin-bottom:12px">'+
       '<label class="chk" style="background:var(--bg2);border-radius:var(--r);margin-bottom:4px">'+
-        '<input type="checkbox" id="'+majId+'" checked '+
+        '<input type="checkbox" id="'+majId+'" '+(majAllChecked?'checked':'')+' '+
         'data-region="'+maj+'" onchange="toggleRegionChkAll(this)">'+
         '<span style="font-size:12px;font-weight:700;color:var(--t1)">'+maj+'</span>'+
         '<span style="font-size:11px;color:var(--t3);margin-left:6px">'+allCxInMaj.length+'개 단지</span>'+
@@ -2672,19 +2692,30 @@ function renderExpList(){
     '</div>';
   }).join('');
 }
+function resetExpFilter(){
+  ['exp-region','exp-minor','exp-type'].forEach(function(id){var el=document.getElementById(id);if(el)el.value='';});
+  updSelMinor('exp-minor','exp-region');
+  renderExpList();
+}
+// 단지 체크박스 하나 토글 — expUnchecked에 반영 후 상위 소분류·대분류 체크 상태 재계산
+function toggleExpChk(cb){
+  if(cb.checked)expUnchecked.delete(cb.value);else expUnchecked.add(cb.value);
+  syncRegionChk(cb.dataset.rgn);syncRegionChk(cb.dataset.maj);
+}
 // 대분류 체크 → 하위 모두 토글
 function toggleRegionChkAll(chk){
   const v=chk.checked;
   const div=chk.closest('div[style*="margin-bottom"]');
   if(!div)return;
-  div.querySelectorAll('input').forEach(function(el){if(el!==chk)el.checked=v;});
+  div.querySelectorAll('.exp-chk').forEach(function(el){el.checked=v;if(v)expUnchecked.delete(el.value);else expUnchecked.add(el.value);});
+  div.querySelectorAll('input[id^="rgn-"]').forEach(function(el){if(el!==chk)el.checked=v;});
 }
 function toggleRegionChk(regionChk){
   const v=regionChk.checked;
-  const region=regionChk.dataset.region;
   const div=regionChk.closest('div');
   if(!div)return;
-  div.querySelectorAll('.exp-chk').forEach(function(el){el.checked=v;});
+  div.querySelectorAll('.exp-chk').forEach(function(el){el.checked=v;if(v)expUnchecked.delete(el.value);else expUnchecked.add(el.value);});
+  syncRegionChk(regionChk.dataset.maj);
 }
 function syncRegionChk(regionId){
   const regionEl=document.getElementById(regionId);if(!regionEl)return;
@@ -2697,8 +2728,12 @@ function syncRegionChk(regionId){
   regionEl.checked=allChecked;
   regionEl.indeterminate=!allChecked&&someChecked;
 }
+// 화면에 현재 보이는(필터를 통과한) 단지에 대해서만 전체 선택/해제한다.
 function selAllExp(v){
-  document.querySelectorAll('#exp-list input[type="checkbox"]').forEach(function(e){e.checked=v;e.indeterminate=false;});
+  document.querySelectorAll('#exp-list input[type="checkbox"]').forEach(function(e){
+    e.checked=v;e.indeterminate=false;
+    if(e.classList.contains('exp-chk')){if(v)expUnchecked.delete(e.value);else expUnchecked.add(e.value);}
+  });
 }
 
 // 'YYYY.MM' 형식의 시작~종료월 사이 모든 월을 오름차순으로 생성 (양끝 포함).
@@ -2803,7 +2838,10 @@ function _exportExcelRun(){
   if(!selTrade&&!selAsk&&!selAskPy&&!selKb&&!selKbPy&&!selJeonse&&!selWolse&&!selYield){showMsg('msg-exp','내보낼 항목을 하나 이상 선택해 주세요.','me');return;}
   // 임대수익률은 환산보증금·환산월세 컬럼(수식이 참조하는 셀)이 있어야 계산할 수 있으므로 월세도 함께 선택되어야 한다.
   if(selYield&&!selWolse){showMsg('msg-exp','임대수익률을 내보내려면 월세도 함께 선택해 주세요.','me');return;}
-  const ids=[...document.querySelectorAll('.exp-chk:checked')].map(e=>e.value);
+  // 단지 목록은 지역/유형 필터로 화면에서 좁혀 볼 수 있으므로, 현재 DOM에 렌더링된
+  // 체크박스만 보면 필터에 가려진 단지의 체크 상태를 놓친다. 실제 선택 여부는 항상
+  // expUnchecked(선택 해제된 단지 id 집합) 기준으로 판단한다.
+  const ids=DB.complexes.filter(function(c){return !expUnchecked.has(c.id);}).map(function(c){return c.id;});
   if(!ids.length){showMsg('msg-exp','내보낼 단지를 선택해 주세요.','me');return;}
   const wb=XLSX.utils.book_new();
   const groups={};
